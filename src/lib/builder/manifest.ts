@@ -46,7 +46,7 @@ function readmeFile(request: BuildRequest, analysis: ProjectAnalysis, source: Pr
     notes.technologies.join(" · "),
     "",
     source === "gemini"
-      ? "Gemini wrote the requirements summary. The files are a starter template, not an AI-written product."
+      ? "This is a Gemini AI-generated project. A feature is listed as included only when its source is in this archive."
       : "The local template builder wrote this archive. It is not an AI-generated project.",
     "",
     "## Objective",
@@ -142,7 +142,8 @@ export function sealManifest(value: unknown): ProjectManifest | null {
   const files: ProjectFile[] = [];
   for (const file of value.files) {
     if (!isRecord(file) || typeof file.path !== "string" || typeof file.contents !== "string") return null;
-    files.push({ path: file.path, contents: file.contents });
+    const origin = file.origin === "gemini" || file.origin === "template" ? file.origin : undefined;
+    files.push(origin ? { path: file.path, contents: file.contents, origin } : { path: file.path, contents: file.contents });
   }
   if (!withinFileLimits(files)) return null;
   const manifest = value as ProjectManifest;

@@ -22,9 +22,12 @@ export type ProjectModule = {
   purpose: string;
 };
 
+export type FileOrigin = "gemini" | "template";
+
 export type ProjectFile = {
   path: string;
   contents: string;
+  origin?: FileOrigin;
 };
 
 export type ProjectManifest = {

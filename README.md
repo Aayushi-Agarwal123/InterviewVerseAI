@@ -39,7 +39,7 @@ Gemini uses the Developer API's `generateContent` request, not the OpenAI chat f
 
 Open **AI Project Builder** in the navigation. Describe a product, pick a stack, and download a ZIP. The four starters are React + Vite + TypeScript, Next.js + TypeScript, Node.js + Express + TypeScript, and React + Express + MongoDB.
 
-Gemini is used only when the server is already in Gemini mode with a model ID. It writes a requirements summary. The files still come from the starter template, and the page says so. With no Gemini key, or when Gemini fails, the **Local Template Builder** creates the same kind of archive and does not call it AI-generated. The ZIP is built in memory. It has no `node_modules` and no API key. Generated code is not installed or run on this server.
+Gemini is used only when the server is already in Gemini mode with a model ID. It writes source files in checked batches: project configuration, frontend, backend, database when the stack has one, and documentation. Each file needs a relative path and is rejected if it is absolute, traverses directories, or is a secret, an API key, or `node_modules`. The preview labels the result **Gemini AI-generated project** or **Local Template-generated project**. A feature is listed as included only when that source is in the archive. If Gemini is unavailable or over quota, the **Local Template Builder** creates the starter and does not call it AI-generated. The ZIP is built in memory. It has no `node_modules` and no API key. Generated code is not installed or run on this server.
 
 OpenAI remains available. Set `INTERVIEWVERSE_COACH_PROVIDER=openai` and a model such as `gpt-4o-mini`. Local mode does not invent a sample answer or a model debrief.
 

@@ -46,16 +46,9 @@ function Choice({
   );
 }
 
-function Tree({ paths }: { paths: string[] }) {
-  return (
-    <ul className="mt-3 overflow-x-auto font-mono text-xs leading-6">
-      {paths.map((path) => (
-        <li key={path} style={{ paddingLeft: `${Math.max(0, path.split("/").length - 1) * 12}px` }}>
-          {path.split("/").at(-1)}
-        </li>
-      ))}
-    </ul>
-  );
+function fileLabel(path: string, origin: "gemini" | "template" | undefined) {
+  if (path === "README.md") return "Notes";
+  return origin === "gemini" ? "Gemini" : "Template";
 }
 
 export function BuilderPage() {
@@ -101,7 +94,7 @@ export function BuilderPage() {
   async function generate() {
     setError("");
     setNotice("");
-    setBusy(builder.mode === "gemini" ? "Gemini is reading this brief." : "Building a local starter.");
+    setBusy(builder.mode === "gemini" ? "Gemini is writing source files." : "Building a local starter.");
     try {
       const response = await fetch("/api/builder", {
         method: "POST",
@@ -158,12 +151,12 @@ export function BuilderPage() {
   }
 
   return (
-    <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <div>
+    <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)]">
+      <div className="min-w-0">
         <PageIntro
           kicker="AI Project Builder"
           title="Describe it. Take a starter home."
-          lede="Write the product in plain language, pick a stack, and download a ZIP of real starter files. The archive does not pretend to be the finished product."
+          lede="Describe the product and pick a stack. Gemini writes source files when it is configured. Otherwise the download is a local template, and the preview says which one you received."
         />
 
         <div className="mt-6 rounded-2xl bg-card px-4 py-4 ring-1 ring-foreground/10">
@@ -273,40 +266,77 @@ export function BuilderPage() {
         </form>
       </div>
 
-      <aside className="lg:pt-2">
+      <aside className="min-w-0 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-auto lg:pt-2">
         {!manifest ? (
           <div className="rounded-2xl bg-card/60 px-4 py-5 ring-1 ring-foreground/10">
             <h2 className="font-heading text-xl tracking-tight">Nothing generated yet</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Generate a starter to see the technologies, the file tree, and the download.
+              Generate a project to see the architecture, the file tree, the file contents, and the download.
             </p>
           </div>
         ) : (
           <div className="rounded-2xl bg-card px-4 py-5 ring-1 ring-foreground/10">
             <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">
-              {manifest.source === "gemini" ? "Gemini Project Builder" : "Local Template Builder"}
+              {manifest.source === "gemini" ? "Gemini AI-generated project" : "Local Template-generated project"}
             </p>
             <h2 className="mt-2 font-heading text-2xl tracking-tight">{manifest.name}</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {manifest.source === "gemini"
-                ? "Gemini summarized the requirements. The files are the starter template for this stack, not a finished product."
-                : "This starter came from a local template. It is not an AI-generated project."}
+                ? "Gemini wrote the files marked Gemini. Files marked Template stayed on the local starter. A feature is listed only when its source is in the archive."
+                : "This is a Local Template-generated project. It is not an AI-generated project."}
             </p>
             {notice ? <p className="mt-3 text-sm leading-6">{notice}</p> : null}
-            <p className="mt-4 text-sm font-medium">{manifest.technologies.join(" · ")}</p>
-            <p className="mt-3 text-sm leading-6">{manifest.objective}</p>
-            <h3 className="mt-5 text-sm font-medium">Requirements</h3>
+            <h3 className="mt-5 text-sm font-medium">Project architecture</h3>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{manifest.technologies.join(" · ")}</p>
+            <p className="mt-2 text-sm leading-6">{manifest.objective}</p>
             <ul className="mt-2 list-disc pl-4 text-sm leading-6 text-muted-foreground">
-              {manifest.functionalRequirements.map((item) => (
+              {manifest.modules.map((item) => (
+                <li key={item.name}>
+                  {item.name}: {item.purpose}
+                </li>
+              ))}
+            </ul>
+            <h3 className="mt-5 text-sm font-medium">Included features</h3>
+            <ul className="mt-2 list-disc pl-4 text-sm leading-6 text-muted-foreground">
+              {manifest.included.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
-            <h3 className="mt-5 text-sm font-medium">
-              {manifest.files.length} files
-            </h3>
-            <Tree paths={[...manifest.files.map((file) => file.path)].sort()} />
+            <h3 className="mt-5 text-sm font-medium">Excluded or incomplete</h3>
+            <ul className="mt-2 list-disc pl-4 text-sm leading-6 text-muted-foreground">
+              {manifest.notIncluded.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <h3 className="mt-5 text-sm font-medium">{manifest.files.length} files</h3>
+            <ul className="mt-3 overflow-x-auto font-mono text-xs leading-6">
+              {[...manifest.files].sort((a, b) => a.path.localeCompare(b.path)).map((file) => (
+                <li key={file.path} className="flex gap-2" style={{ paddingLeft: `${Math.max(0, file.path.split("/").length - 1) * 12}px` }}>
+                  <span className="min-w-0 flex-1 truncate">{file.path.split("/").at(-1)}</span>
+                  <span className="shrink-0 text-[10px] tracking-wide text-muted-foreground uppercase">
+                    {fileLabel(file.path, file.origin)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <h3 className="mt-5 text-sm font-medium">File contents</h3>
+            <div className="mt-2 flex flex-col gap-2">
+              {[...manifest.files].sort((a, b) => a.path.localeCompare(b.path)).map((file) => (
+                <details key={file.path} className="rounded-lg bg-background px-3 py-2 ring-1 ring-foreground/10">
+                  <summary className="cursor-pointer font-mono text-xs">
+                    {file.path}
+                    <span className="ml-2 text-[10px] tracking-wide text-muted-foreground uppercase">
+                      {fileLabel(file.path, file.origin)}
+                    </span>
+                  </summary>
+                  <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-5">
+                    {file.contents}
+                  </pre>
+                </details>
+              ))}
+            </div>
             <h3 className="mt-5 text-sm font-medium">Dependencies</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{manifest.dependencies.join(", ")}</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{manifest.dependencies.join(", ") || "None listed."}</p>
             <Button type="button" className="mt-5 h-10 w-full" disabled={Boolean(busy)} onClick={() => void download()}>
               {busy === "Packing the ZIP." ? "Packing…" : "Download ZIP"}
             </Button>

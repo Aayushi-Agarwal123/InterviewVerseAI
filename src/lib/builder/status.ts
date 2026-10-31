@@ -9,7 +9,7 @@ export type BuilderSnapshot = {
 const COPY: Record<BuilderSnapshot["reason"], Pick<BuilderSnapshot, "label" | "detail">> = {
   ready: {
     label: "Gemini Project Builder",
-    detail: "The brief is sent to Google's Gemini API for a requirements summary. The files are still a local starter template. The key stays on the server.",
+    detail: "The brief is sent to Google's Gemini API. Gemini writes source files in checked batches. If Gemini is unavailable or over quota, the local template is used instead. The key stays on the server.",
   },
   "no-api-key": {
     label: "Local Template Builder",

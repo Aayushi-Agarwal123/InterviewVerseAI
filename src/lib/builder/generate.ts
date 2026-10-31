@@ -2,11 +2,20 @@ import type { CoachRuntime } from "@/lib/coach/config";
 import { ModelCallError } from "@/lib/coach/errors";
 import { completeGemini } from "@/lib/coach/gemini";
 import type { ChatMessage } from "@/lib/coach/prompt";
+import {
+  ANALYSIS_TIMEOUT_MS,
+  applyCodeGeneration,
+  budgetSignal,
+  GENERATION_BUDGET_MS,
+} from "@/lib/builder/codegen";
 import { assembleManifest, localAnalysis, type ProjectAnalysis } from "@/lib/builder/manifest";
 import { STACK_LABELS, type BuildRequest, type ProjectManifest, type ProjectModule } from "@/lib/builder/types";
 
 export const BUILDER_UNREADABLE_NOTICE =
   "The Gemini reply could not be read. This starter was built from the local template.";
+
+export const CODE_UNUSABLE_NOTICE =
+  "Gemini did not return usable source files. This starter was built from the local template.";
 
 const GEMINI_NOTICES = {
   quota: "Gemini's free quota is exhausted. This starter was built from the local template.",
@@ -113,10 +122,16 @@ export async function generateProject(
   fetchImpl?: typeof fetch,
 ): Promise<GenerateResult> {
   const local = localAnalysis(request);
-  if (!geminiBuilderReady(config) || !config.apiKey) {
-    return { mode: "local", manifest: assembleManifest(request, local, "local") };
-  }
+  const fallback = (notice?: string): GenerateResult => ({
+    mode: "local",
+    notice,
+    manifest: assembleManifest(request, local, "local"),
+  });
+  if (!geminiBuilderReady(config) || !config.apiKey) return fallback();
+  const deadline = Date.now() + GENERATION_BUDGET_MS;
   try {
+    const signal = budgetSignal(deadline, ANALYSIS_TIMEOUT_MS);
+    if (!signal) return fallback("Gemini did not answer. This starter was built from the local template.");
     const text = await completeGemini(
       {
         apiKey: config.apiKey,
@@ -124,24 +139,16 @@ export async function generateProject(
         baseUrl: config.baseUrl,
         temperature: 0.2,
         messages: builderMessages(request),
-        signal: AbortSignal.timeout(25_000),
+        signal,
       },
       fetchImpl,
     );
     const analysis = parseAnalysis(text);
-    if (!analysis) {
-      return {
-        mode: "local",
-        notice: BUILDER_UNREADABLE_NOTICE,
-        manifest: assembleManifest(request, local, "local"),
-      };
-    }
-    return { mode: "gemini", manifest: assembleManifest(request, analysis, "gemini") };
+    if (!analysis) return fallback(BUILDER_UNREADABLE_NOTICE);
+    const written = await applyCodeGeneration(request, analysis, config, fetchImpl, deadline);
+    if (!written) return fallback(CODE_UNUSABLE_NOTICE);
+    return { mode: "gemini", notice: written.notice, manifest: written.manifest };
   } catch (error) {
-    return {
-      mode: "local",
-      notice: noticeFor(error),
-      manifest: assembleManifest(request, local, "local"),
-    };
+    return fallback(noticeFor(error));
   }
 }

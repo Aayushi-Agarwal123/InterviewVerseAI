@@ -9,6 +9,7 @@ import {
 import { buildSampleSession } from "../src/lib/engine/sample";
 import { currentStreak } from "../src/lib/format";
 import { unzipSync, strFromU8 } from "fflate";
+import { batchesFor, filterBatchFiles, parseBatchPayload, pathAllowed, scanProject } from "../src/lib/builder/codegen";
 import { generateProject } from "../src/lib/builder/generate";
 import { sealManifest } from "../src/lib/builder/manifest";
 import { LIMITS, safeRelativePath } from "../src/lib/builder/paths";
@@ -986,40 +987,213 @@ const geminiRequest = parseBuildRequest({
 });
 assert(geminiRequest.ok, "gemini builder request");
 if (geminiRequest.ok) {
+  const expressRequest = geminiRequest.value;
+  assert(
+    JSON.stringify(batchesFor(expressRequest)) === JSON.stringify(["configuration", "backend", "documentation"]),
+    "express batches skip frontend and database",
+  );
+  assert(pathAllowed("backend", "src/index.ts", expressRequest), "backend source path");
+  assert(!pathAllowed("backend", "../etc/passwd", expressRequest), "backend rejects traversal");
+  assert(!pathAllowed("backend", "/tmp/app.ts", expressRequest), "backend rejects absolute");
+  assert(!pathAllowed("backend", "node_modules/evil.js", expressRequest), "backend rejects node_modules");
+  assert(!pathAllowed("backend", ".env", expressRequest), "backend rejects env file");
+  assert(!pathAllowed("database", "src/db.ts", expressRequest), "database batch stays closed without mongo");
+  assert(parseBatchPayload("not json") === null, "batch payload must be json");
+  const filtered = filterBatchFiles(
+    "backend",
+    expressRequest,
+    [
+      { path: "../etc/passwd", contents: "pwned" },
+      { path: "src/index.ts", contents: 'export const marker = "kept";\n' },
+      { path: "src/big.ts", contents: "x".repeat(LIMITS.fileChars + 1) },
+    ],
+    null,
+    [],
+  );
+  assert(filtered.length === 1 && filtered[0]?.path === "src/index.ts", "filter keeps the valid file");
+  assert(!filtered.some((entry) => entry.contents.length > LIMITS.fileChars), "filter drops oversized output");
+  const commented = scanProject(
+    [{ path: "src/index.ts", contents: 'app.get("/health", () => {});\n// authentication password login\n' }],
+    {
+      ...expressRequest,
+      description: "Create an interview practice service with authentication and score tracking.",
+    },
+    {
+      objective: "Practice interviews with accounts.",
+      functionalRequirements: ["Practice a written interview round."],
+      nonFunctionalRequirements: ["Run locally."],
+      modules: [{ name: "API", purpose: "Serves the interview routes." }],
+    },
+  );
+  assert(commented.notIncluded.some((item) => item.includes("Authentication")), "auth comment is not implementation");
+  assert(!commented.included.some((item) => /authentication/i.test(item)), "auth is excluded without source");
+  const authed = scanProject(
+    [{ path: "src/index.ts", contents: 'import bcrypt from "bcrypt";\napp.post("/api/login", () => password);\n' }],
+    {
+      ...expressRequest,
+      description: "Create an interview practice service with authentication and score tracking.",
+    },
+    {
+      objective: "Practice interviews with accounts.",
+      functionalRequirements: ["Sign in with a password."],
+      nonFunctionalRequirements: ["Run locally."],
+      modules: [{ name: "API", purpose: "Serves the interview routes." }],
+    },
+  );
+  assert(authed.included.some((item) => item.includes("authentication code")), "auth source counts as present");
+  const lookalike = scanProject(
+    [
+      { path: "src/styles.css", contents: "body { background: #f6f1e8; }\n" },
+      { path: "src/App.tsx", contents: "export function App(){ return <h1>Interview Prep</h1> }\n" },
+    ],
+    expressRequest,
+    {
+      objective: "Help candidates practice interviews.",
+      functionalRequirements: ["Practice a written interview round."],
+      nonFunctionalRequirements: ["Run locally."],
+      modules: [{ name: "App", purpose: "Shows the name." }],
+    },
+  );
+  assert(
+    lookalike.notIncluded.some((item) => item.includes("Practice a written interview round")),
+    "a color named background does not count as the word round",
+  );
+  assert(
+    !lookalike.included.some((item) => item.includes("Practice a written interview round")),
+    "the project title alone does not mark the brief line present",
+  );
+
   const analysis = JSON.stringify({
     objective: "Help candidates practice interviews and review their scores.",
     functionalRequirements: ["Practice a written interview round."],
     nonFunctionalRequirements: ["Run locally without a paid account."],
     modules: [{ name: "Practice desk", purpose: "Holds the brief for a later build." }],
   });
+  const generatedIndex = [
+    'import express from "express";',
+    'import { databaseConfigured, getItems, saveItem } from "./db.ts";',
+    'export const marker = "gemini-wrote-health";',
+    "const app = express();",
+    "app.use(express.json());",
+    'app.get("/health", (_request, response) => {',
+    "  response.json({ ok: true, database: databaseConfigured(), marker });",
+    "});",
+    'app.get("/api/items", async (_request, response) => {',
+    "  response.json({ items: await getItems() });",
+    "});",
+    "const port = Number(process.env.PORT ?? 4000);",
+    "app.listen(port);",
+    `const leak = "${secret}";`,
+    "",
+  ].join("\n");
+  const generatedPackage = JSON.stringify(
+    {
+      name: "interview-prep",
+      private: true,
+      version: "0.1.0",
+      description: "gemini-codegen-marker",
+      type: "module",
+      scripts: { dev: "tsx watch src/index.ts", start: "tsx src/index.ts", postinstall: "echo no" },
+      dependencies: { express: "^4.21.2" },
+    },
+    null,
+    2,
+  );
+
+  function geminiText(text: string): Response {
+    return geminiResponse(200, { candidates: [{ content: { parts: [{ text }] } }] });
+  }
+
+  function filesPayload(files: { path: string; contents: string }[]): Response {
+    return geminiText(JSON.stringify({ files }));
+  }
+
+  function builderScript(
+    onBatch: (kind: "analysis" | "configuration" | "frontend" | "backend" | "database" | "documentation") => Response,
+  ) {
+    return (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as {
+        systemInstruction?: { parts?: { text?: string }[] };
+        contents?: { parts?: { text?: string }[] }[];
+      };
+      const system = body.systemInstruction?.parts?.[0]?.text ?? "";
+      const user = body.contents?.[0]?.parts?.[0]?.text ?? "";
+      if (system.includes("Do not write source code")) return onBatch("analysis");
+      const match = user.match(/Batch: (configuration|frontend|backend|database|documentation)/);
+      if (!match) return geminiText("not json");
+      return onBatch(match[1] as "configuration" | "frontend" | "backend" | "database" | "documentation");
+    };
+  }
+
   const generated = await withFetch(
-    () =>
-      geminiResponse(200, {
-        candidates: [{ content: { parts: [{ text: analysis }] }, role: "model" }],
-      }),
-    () => generateProject(geminiRequest.value, geminiConfig),
+    builderScript((kind) => {
+      if (kind === "analysis") return geminiText(analysis);
+      if (kind === "configuration") {
+        return filesPayload([
+          { path: "../etc/passwd", contents: "pwned" },
+          { path: "/tmp/app.ts", contents: "nope" },
+          { path: "node_modules/evil.js", contents: "nope" },
+          { path: ".env", contents: "KEY=secret" },
+          { path: "package.json", contents: generatedPackage },
+        ]);
+      }
+      if (kind === "backend") {
+        return filesPayload([
+          { path: "src/index.ts", contents: generatedIndex },
+          { path: "src/../../secret.ts", contents: "nope" },
+        ]);
+      }
+      if (kind === "documentation") {
+        return filesPayload([{ path: "README.md", contents: "Authentication is fully implemented.\n" }]);
+      }
+      return filesPayload([]);
+    }),
+    () => generateProject(expressRequest, geminiConfig),
   );
-  assert(generated.calls.length === 1, "builder calls gemini once");
-  assert(generated.calls[0]?.url.includes(":generateContent"), "builder uses generateContent");
-  assert(!generated.calls[0]?.url.includes(secret), "builder keeps the key out of the url");
-  const builderBody = JSON.parse(String(generated.calls[0]?.init.body)) as {
-    systemInstruction?: { parts?: { text?: string }[] };
-  };
-  assert(!builderBody.systemInstruction?.parts?.[0]?.text?.includes("Arun Mehta"), "builder prompt is not an interview");
-  assert(generated.result.mode === "gemini" && generated.result.manifest.source === "gemini", "gemini summary");
+  assert(generated.calls.length === 4, "express codegen uses analysis and three batches");
+  assert(generated.calls.every((call) => call.url.includes(":generateContent")), "codegen uses generateContent");
+  assert(generated.calls.every((call) => !call.url.includes(secret)), "codegen keeps the key out of the url");
+  assert(new Headers(generated.calls[0]?.init.headers).get("x-goog-api-key") === secret, "codegen sends the key as a header");
+  const prompts = generated.calls.map((call) => String(call.init.body));
+  assert(prompts.every((body) => !body.includes("Arun Mehta") && !body.includes(secret)), "codegen prompt is not an interview and omits the key");
+  assert(generated.result.mode === "gemini" && generated.result.manifest.source === "gemini", "gemini source project");
   assert(generated.result.manifest.objective.includes("practice interviews"), "gemini objective kept");
+  const joined = generated.result.manifest.files.map((entry) => `${entry.path}\n${entry.contents}`).join("\n");
+  assert(joined.includes("Gemini AI-generated project"), "gemini project label");
+  assert(joined.includes("A feature is listed as included only when its source is in this archive."), "honest feature rule");
+  assert(joined.includes("Excluded or incomplete"), "excluded section");
+  assert(joined.includes("gemini-wrote-health"), "generated server source");
+  assert(joined.includes("gemini-codegen-marker"), "generated package manifest");
+  assert(!joined.includes("postinstall"), "lifecycle scripts are removed");
+  assert(!joined.includes(secret) && joined.includes("[redacted]"), "generated source redacts the key");
+  assert(!joined.includes("fully implemented") && !joined.includes("pwned"), "rejected files stay out of the archive");
+  assert(!generated.result.manifest.files.some((entry) => entry.path.includes("..") || entry.path.includes("node_modules") || entry.path === ".env"), "invalid paths are dropped");
+  assert(generated.result.manifest.files.some((entry) => entry.path === "src/db.ts" && entry.origin === "template"), "missing files keep the template");
+  assert(generated.result.manifest.included.some((item) => item.includes("GET /health")), "health route is claimed from source");
+  assert(!generated.result.manifest.included.some((item) => /authentication/i.test(item)), "auth is not claimed");
   assert(
-    generated.result.manifest.files.some((entry) => entry.contents.includes("Gemini wrote the requirements summary")),
-    "gemini attribution",
+    generated.result.manifest.notIncluded.some((item) => item.includes("Practice a written interview round")),
+    "missing brief line stays excluded",
   );
-  assert(generated.result.manifest.files.some((entry) => entry.path === "src/index.ts"), "template files remain");
+  const codedZip = zipProject(generated.result.manifest.slug, generated.result.manifest.files, secret);
+  assert(codedZip, "generated zip bytes");
+  if (codedZip) {
+    const opened = unzipSync(codedZip);
+    const names = Object.keys(opened);
+    assert(names.every((entry) => entry.startsWith("interview-prep/") && !entry.includes("..")), "zip paths stay inside the project");
+    assert(!names.some((entry) => entry.includes("node_modules")), "generated zip skips node_modules");
+    const indexName = names.find((entry) => entry.endsWith("src/index.ts"));
+    assert(indexName && strFromU8(opened[indexName]).includes("gemini-wrote-health"), "zip contains generated source");
+    assert(!names.some((entry) => entry.endsWith("/.env")), "zip has no secret env file");
+    assert(!strFromU8(codedZip).includes(secret), "generated zip omits the server key");
+  }
 
   const quotaProject = await withFetch(
     () =>
       geminiResponse(429, {
         error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "You exceeded your current quota." },
       }),
-    () => generateProject(geminiRequest.value, geminiConfig),
+    () => generateProject(expressRequest, geminiConfig),
   );
   assert(quotaProject.calls.length === 1, "builder quota is not retried");
   assert(quotaProject.result.mode === "local" && quotaProject.result.manifest.source === "local", "quota uses the template");
@@ -1029,12 +1203,172 @@ if (geminiRequest.ok) {
     "quota result is not labeled as AI",
   );
 
+  let quotaStep = 0;
+  const midQuota = await withFetch(
+    () => {
+      quotaStep += 1;
+      if (quotaStep === 1) return geminiText(analysis);
+      return geminiResponse(429, {
+        error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "You exceeded your current quota." },
+      });
+    },
+    () => generateProject(expressRequest, geminiConfig),
+  );
+  assert(midQuota.calls.length === 2, "quota during codegen stops the remaining batches");
+  assert(midQuota.result.manifest.source === "local", "mid-batch quota uses the local template");
+  assert(!midQuota.result.manifest.files.some((entry) => entry.contents.includes("gemini-wrote-health")), "quota does not keep partial source");
+
   const broken = await withFetch(
     () => geminiResponse(200, { candidates: [{ content: { parts: [{ text: "not json" }] } }] }),
-    () => generateProject(geminiRequest.value, geminiConfig),
+    () => generateProject(expressRequest, geminiConfig),
   );
   assert(broken.calls.length === 1 && broken.result.manifest.source === "local", "malformed builder reply falls back");
   assert(broken.result.notice?.includes("could not be read"), "malformed builder notice");
+
+  const unreadableCode = await withFetch(
+    builderScript((kind) => (kind === "analysis" ? geminiText(analysis) : geminiText("not json"))),
+    () => generateProject(expressRequest, geminiConfig),
+  );
+  assert(unreadableCode.calls.length === 4 && unreadableCode.result.manifest.source === "local", "unreadable batches fall back");
+  assert(unreadableCode.result.notice?.includes("usable source"), "unreadable source notice");
+
+  const missingPackage = await withFetch(
+    builderScript((kind) => {
+      if (kind === "analysis") return geminiText(analysis);
+      if (kind === "configuration") {
+        return filesPayload([{ path: "tsconfig.json", contents: '{\n  "compilerOptions": { "strict": true },\n  "marker": "gemini-tsconfig"\n}\n' }]);
+      }
+      if (kind === "backend") return filesPayload([{ path: "src/index.ts", contents: generatedIndex }]);
+      return filesPayload([]);
+    }),
+    () => generateProject(expressRequest, geminiConfig),
+  );
+  const packageJson = missingPackage.result.manifest.files.find((entry) => entry.path === "package.json")?.contents ?? "";
+  assert(packageJson.includes("@types/express"), "missing package.json keeps the template");
+  assert(missingPackage.result.manifest.files.some((entry) => entry.contents.includes("gemini-tsconfig")), "returned config file is kept");
+  assert(missingPackage.result.manifest.files.some((entry) => entry.origin === "gemini" && entry.path === "src/index.ts"), "returned source replaces the template");
+
+  const oversized = await withFetch(
+    builderScript((kind) => {
+      if (kind === "analysis") return geminiText(analysis);
+      if (kind === "configuration") return filesPayload([{ path: "package.json", contents: generatedPackage }]);
+      if (kind === "backend") return filesPayload([{ path: "src/index.ts", contents: "x".repeat(LIMITS.fileChars + 1) }]);
+      return filesPayload([]);
+    }),
+    () => generateProject(expressRequest, geminiConfig),
+  );
+  const oversizedIndex = oversized.result.manifest.files.find((entry) => entry.path === "src/index.ts")?.contents ?? "";
+  assert(oversized.result.manifest.source === "gemini", "a valid file still marks the project");
+  assert(oversizedIndex.includes("/health") && oversizedIndex.length <= LIMITS.fileChars, "oversized source keeps the template file");
+  assert(oversized.result.manifest.files.every((entry) => entry.contents.length <= LIMITS.fileChars), "no file exceeds the size limit");
+
+  const partial = await withFetch(
+    builderScript((kind) => {
+      if (kind === "analysis") return geminiText(analysis);
+      if (kind === "configuration") return geminiResponse(500, { error: { message: "unavailable" } });
+      if (kind === "backend") return filesPayload([{ path: "src/index.ts", contents: generatedIndex }]);
+      return filesPayload([]);
+    }),
+    () => generateProject(expressRequest, geminiConfig),
+  );
+  assert(partial.result.manifest.source === "gemini", "a later batch can still write source");
+  assert(partial.result.notice?.includes("local template"), "partial batch explains the template files");
+  assert(
+    partial.result.manifest.files.some((entry) => entry.path === "package.json" && entry.origin !== "gemini" && entry.contents.includes("@types/express")),
+    "failed configuration batch keeps the template manifest",
+  );
+}
+
+const fullGemini = parseBuildRequest({
+  name: "Interview Prep",
+  description: builderBrief,
+  extras: "",
+  frontend: "react-vite",
+  backend: "express",
+  database: "mongodb",
+});
+assert(fullGemini.ok, "fullstack codegen request");
+if (fullGemini.ok) {
+  assert(
+    JSON.stringify(batchesFor(fullGemini.value)) ===
+      JSON.stringify(["configuration", "frontend", "backend", "database", "documentation"]),
+    "fullstack includes a database batch",
+  );
+  assert(pathAllowed("database", "server/src/db.ts", fullGemini.value), "mongo file is allowed");
+  assert(!pathAllowed("database", "src/db.ts", fullGemini.value), "fullstack database path stays under server");
+  const fullAnalysis = JSON.stringify({
+    objective: "Help candidates practice interviews and review their scores.",
+    functionalRequirements: ["Practice a written interview round."],
+    nonFunctionalRequirements: ["Run locally without a paid account."],
+    modules: [{ name: "Practice desk", purpose: "Holds the brief for a later build." }],
+  });
+  const fullProject = await withFetch(
+    (_url, init) => {
+      const body = JSON.parse(String(init.body)) as {
+        systemInstruction?: { parts?: { text?: string }[] };
+        contents?: { parts?: { text?: string }[] }[];
+      };
+      const system = body.systemInstruction?.parts?.[0]?.text ?? "";
+      const user = body.contents?.[0]?.parts?.[0]?.text ?? "";
+      const analysisResponse = geminiResponse(200, { candidates: [{ content: { parts: [{ text: fullAnalysis }] } }] });
+      if (system.includes("Do not write source code")) return analysisResponse;
+      const payload = (files: { path: string; contents: string }[]) =>
+        geminiResponse(200, { candidates: [{ content: { parts: [{ text: JSON.stringify({ files }) }] } }] });
+      if (user.includes("Batch: frontend")) {
+        return payload([
+          {
+            path: "client/src/App.tsx",
+            contents: 'import { useState } from "react";\nexport function App(){ return <main>gemini-client-screen</main> }\n',
+          },
+        ]);
+      }
+      if (user.includes("Batch: database")) {
+        return payload([
+          {
+            path: "server/src/db.ts",
+            contents: 'import { MongoClient } from "mongodb";\nexport const marker = "gemini-mongo-store";\nconst client = new MongoClient("");\n',
+          },
+          { path: "../server/src/db.ts", contents: "nope" },
+        ]);
+      }
+      return payload([]);
+    },
+    () => generateProject(fullGemini.value, geminiConfig),
+  );
+  assert(fullProject.calls.length === 6, "fullstack codegen calls each batch");
+  const batchText = fullProject.calls.map((call) => String(call.init.body)).join("\n");
+  assert(batchText.includes("Batch: frontend") && batchText.includes("Batch: database"), "frontend and database batches run");
+  assert(!batchText.includes("Batch: missing"), "batch names stay explicit");
+  const fullJoined = fullProject.result.manifest.files.map((entry) => entry.contents).join("\n");
+  assert(fullJoined.includes("gemini-client-screen"), "frontend source is generated");
+  assert(fullJoined.includes("gemini-mongo-store"), "database source is generated");
+  assert(fullProject.result.manifest.included.some((item) => item.includes("MongoDB")), "mongo is claimed from source");
+  assert(fullProject.result.manifest.included.some((item) => item.includes("React")), "react is claimed from source");
+  const fullZip = zipProject(fullProject.result.manifest.slug, fullProject.result.manifest.files, secret);
+  assert(fullZip, "fullstack zip");
+  if (fullZip) {
+    const opened = unzipSync(fullZip);
+    const client = Object.keys(opened).find((entry) => entry.endsWith("client/src/App.tsx"));
+    const database = Object.keys(opened).find((entry) => entry.endsWith("server/src/db.ts"));
+    assert(client && strFromU8(opened[client]).includes("gemini-client-screen"), "zip contains the generated client");
+    assert(database && strFromU8(opened[database]).includes("gemini-mongo-store"), "zip contains the generated database file");
+    assert(!Object.keys(opened).some((entry) => entry.includes("..")), "zip rejects traversal names");
+  }
+}
+
+const nextGemini = parseBuildRequest({
+  name: "Interview Prep",
+  description: builderBrief,
+  extras: "",
+  frontend: "next",
+  backend: "none",
+  database: "none",
+});
+assert(nextGemini.ok, "next codegen request");
+if (nextGemini.ok) {
+  assert(!batchesFor(nextGemini.value).includes("backend"), "next does not request a backend batch");
+  assert(pathAllowed("frontend", "src/app/page.tsx", nextGemini.value), "next page path");
+  assert(!pathAllowed("backend", "server/src/index.ts", nextGemini.value), "next rejects an express path");
 }
 
 console.log(
