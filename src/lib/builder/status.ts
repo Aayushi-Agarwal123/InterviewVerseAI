@@ -13,7 +13,8 @@ const COPY: Record<BuilderSnapshot["reason"], Pick<BuilderSnapshot, "label" | "d
   },
   "no-api-key": {
     label: "Local Template Builder",
-    detail: "No Gemini key on the server. Starters come from local templates and are not AI-generated.",
+    detail:
+      "No Gemini key on the server, or the value is still a placeholder. Create a key in Google AI Studio. It starts with AIza. Starters come from local templates and are not AI-generated.",
   },
   "not-gemini": {
     label: "Local Template Builder",
@@ -21,7 +22,8 @@ const COPY: Record<BuilderSnapshot["reason"], Pick<BuilderSnapshot, "label" | "d
   },
   "missing-model": {
     label: "Local Template Builder",
-    detail: "Set INTERVIEWVERSE_COACH_MODEL to a Gemini model ID. Until then, starters come from local templates.",
+    detail:
+      "Set INTERVIEWVERSE_COACH_MODEL to a model ID from Google AI Studio, not a placeholder such as YOUR_MODEL_ID. Until then, starters come from local templates.",
   },
   "forced-local": {
     label: "Local Template Builder",

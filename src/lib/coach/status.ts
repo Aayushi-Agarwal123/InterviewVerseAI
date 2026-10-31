@@ -23,7 +23,7 @@ const COPY: Record<CoachModeSnapshot["reason"], Pick<CoachModeSnapshot, "label" 
   },
   "no-api-key": {
     label: "Local Coach",
-    detail: "No model key on the server. Scoring uses the rubric on this device.",
+    detail: "No model key on the server, or the value is still a placeholder. Scoring uses the rubric on this device.",
   },
   "forced-local": {
     label: "Local Coach",
@@ -35,7 +35,8 @@ const COPY: Record<CoachModeSnapshot["reason"], Pick<CoachModeSnapshot, "label" 
   },
   "missing-model": {
     label: "Local Coach",
-    detail: "Set INTERVIEWVERSE_COACH_MODEL to a Gemini model ID. Scoring uses the rubric on this device.",
+    detail:
+      "Set INTERVIEWVERSE_COACH_MODEL to a model ID from Google AI Studio, not a placeholder. Scoring uses the rubric on this device.",
   },
 };
 

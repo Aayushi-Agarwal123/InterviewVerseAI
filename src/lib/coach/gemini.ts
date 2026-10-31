@@ -20,13 +20,23 @@ function readGeminiText(value: unknown): string | null {
   return text || null;
 }
 
+function errorReason(details: unknown): string {
+  if (!Array.isArray(details)) return "";
+  for (const entry of details) {
+    if (isRecord(entry) && typeof entry.reason === "string") return entry.reason;
+  }
+  return "";
+}
+
 async function classifyFailure(response: Response): Promise<ModelFailure> {
   let status = "";
   let message = "";
+  let reason = "";
   try {
-    const payload = (await response.json()) as { error?: { status?: unknown; message?: unknown } };
+    const payload = (await response.json()) as { error?: { status?: unknown; message?: unknown; details?: unknown } };
     if (typeof payload.error?.status === "string") status = payload.error.status;
     if (typeof payload.error?.message === "string") message = payload.error.message;
+    reason = errorReason(payload.error?.details);
   } catch {
     await response.body?.cancel().catch(() => undefined);
   }
@@ -34,15 +44,39 @@ async function classifyFailure(response: Response): Promise<ModelFailure> {
   if (response.status === 429 || status === "RESOURCE_EXHAUSTED") {
     return quota ? "quota" : "rate-limit";
   }
+  if (reason === "API_KEY_INVALID" || /api key not valid|api_key_invalid/i.test(message)) return "invalid-key";
+  if (
+    reason === "API_KEY_HTTP_REFERRER_BLOCKED" ||
+    reason === "API_KEY_IP_ADDRESS_BLOCKED" ||
+    reason === "API_KEY_ANDROID_APP_BLOCKED" ||
+    reason === "API_KEY_IOS_APP_BLOCKED" ||
+    /referr?er|ip address|android app|ios app/i.test(message)
+  ) {
+    return "restricted-key";
+  }
+  if (
+    reason === "API_KEY_SERVICE_BLOCKED" ||
+    reason === "SERVICE_DISABLED" ||
+    /has not been used|is disabled|service.?blocked/i.test(message)
+  ) {
+    return "api-disabled";
+  }
+  if (
+    response.status === 404 ||
+    status === "NOT_FOUND" ||
+    /not found|not supported|unknown model/i.test(message)
+  ) {
+    return "unsupported-model";
+  }
   if (
     response.status === 401 ||
     response.status === 403 ||
     status === "UNAUTHENTICATED" ||
-    status === "PERMISSION_DENIED" ||
-    /api key/i.test(message)
+    status === "PERMISSION_DENIED"
   ) {
     return "invalid-key";
   }
+  if (response.status === 400 || status === "INVALID_ARGUMENT") return "malformed-request";
   return "unavailable";
 }
 

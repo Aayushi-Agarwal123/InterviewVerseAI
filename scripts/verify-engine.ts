@@ -550,6 +550,34 @@ assert(
   }).reason === "missing-model",
   "gemini model id cannot change the request path",
 );
+const placeholderModel = readCoachConfig({
+  INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+  INTERVIEWVERSE_COACH_API_KEY: secret,
+  INTERVIEWVERSE_COACH_MODEL: "YOUR_MODEL_ID",
+});
+assert(
+  placeholderModel.mode === "local" && placeholderModel.reason === "missing-model" && placeholderModel.apiKey === null,
+  "placeholder model stays local",
+);
+const placeholderKey = readCoachConfig({
+  INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+  INTERVIEWVERSE_COACH_API_KEY: "YOUR_GEMINI_API_KEY",
+  INTERVIEWVERSE_COACH_MODEL: geminiModel,
+});
+assert(
+  placeholderKey.mode === "local" && placeholderKey.reason === "no-api-key" && placeholderKey.apiKey === null,
+  "placeholder key stays local",
+);
+const placeholderBoth = readCoachConfig({
+  INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+  INTERVIEWVERSE_COACH_API_KEY: "YOUR_GEMINI_API_KEY",
+  INTERVIEWVERSE_COACH_MODEL: "YOUR_MODEL_ID",
+});
+assert(
+  placeholderBoth.mode === "local" && placeholderBoth.reason === "missing-model" && placeholderBoth.apiKey === null,
+  "placeholder model and key stay local",
+);
+assert(!JSON.stringify(placeholderBoth).includes("YOUR_GEMINI_API_KEY"), "placeholder key is not stored");
 
 const weakInput = {
   questionId: twoSum.id,
@@ -599,6 +627,10 @@ try {
   assert(localCalls === 0 && quiet.verdict.source === "local", "local gemini config does not call fetch");
   const unconfigured = await evaluateAnswer(twoSum, weakInput, geminiMissingModel);
   assert(localCalls === 0 && unconfigured.verdict.source === "local", "missing model does not call fetch");
+  const placeholderAnswer = await evaluateAnswer(twoSum, weakInput, placeholderBoth);
+  assert(localCalls === 0 && placeholderAnswer.verdict.source === "local", "placeholder config does not call fetch");
+  const placeholderKeyAnswer = await evaluateAnswer(twoSum, weakInput, placeholderKey);
+  assert(localCalls === 0 && placeholderKeyAnswer.verdict.source === "local", "placeholder key does not call fetch");
 } finally {
   globalThis.fetch = originalFetch;
 }
@@ -755,6 +787,168 @@ const invalidEval = await withFetch(
 assert(invalidEval.calls.length === 1, "invalid evaluation is not retried");
 assert(invalidEval.result.verdict.source === "local", "invalid key uses the local coach");
 assert(invalidEval.result.notice?.includes("rejected") && invalidEval.result.notice.includes("kept"), "invalid key notice");
+assert(invalidEval.result.notice?.includes("Google AI Studio"), "invalid key notice names AI Studio");
+
+const geminiFailures = [
+  {
+    failure: "invalid-key",
+    status: 400,
+    body: {
+      error: {
+        code: 400,
+        status: "INVALID_ARGUMENT",
+        message: `API key not valid. Please pass a valid API key. ${secret}`,
+        details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "API_KEY_INVALID", domain: "googleapis.com" }],
+      },
+    },
+    notice: "rejected",
+  },
+  {
+    failure: "restricted-key",
+    status: 403,
+    body: {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: `Requests from referer <empty> are blocked. ${secret}`,
+        details: [{ reason: "API_KEY_HTTP_REFERRER_BLOCKED", domain: "googleapis.com" }],
+      },
+    },
+    notice: "application restrictions",
+  },
+  {
+    failure: "restricted-key",
+    status: 403,
+    body: {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: "The caller does not have permission",
+        details: [{ reason: "API_KEY_IP_ADDRESS_BLOCKED", domain: "googleapis.com" }],
+      },
+    },
+    notice: "application restrictions",
+  },
+  {
+    failure: "api-disabled",
+    status: 403,
+    body: {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: "Generative Language API has not been used in project before or it is disabled.",
+        details: [{ reason: "SERVICE_DISABLED", domain: "googleapis.com" }],
+      },
+    },
+    notice: "Generative Language API",
+  },
+  {
+    failure: "api-disabled",
+    status: 403,
+    body: {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: "Requests to this API are blocked.",
+        details: [{ reason: "API_KEY_SERVICE_BLOCKED", domain: "googleapis.com" }],
+      },
+    },
+    notice: "Generative Language API",
+  },
+  {
+    failure: "unsupported-model",
+    status: 404,
+    body: {
+      error: {
+        code: 404,
+        status: "NOT_FOUND",
+        message: `models/YOUR_MODEL_ID is not found for API version v1beta. ${secret}`,
+      },
+    },
+    notice: "INTERVIEWVERSE_COACH_MODEL",
+  },
+  {
+    failure: "malformed-request",
+    status: 400,
+    body: {
+      error: {
+        code: 400,
+        status: "INVALID_ARGUMENT",
+        message: `Invalid JSON payload received. Unknown name "contentsx". ${secret}`,
+      },
+    },
+    notice: "request body",
+  },
+] as const;
+
+for (const sample of geminiFailures) {
+  const classified = await withFetch(
+    () => geminiResponse(sample.status, sample.body),
+    async () => {
+      try {
+        await completeGemini({
+          apiKey: secret,
+          model: geminiModel,
+          baseUrl: geminiConfig.baseUrl,
+          temperature: 0.2,
+          messages: [{ role: "user", content: weakInput.answer }],
+          signal: AbortSignal.timeout(1000),
+        });
+        return "resolved";
+      } catch (error) {
+        return error instanceof ModelCallError ? error.failure : "other";
+      }
+    },
+  );
+  assert(classified.calls.length === 1, `${sample.failure} is not retried`);
+  assert(classified.result === sample.failure, `${sample.failure} is classified from the provider error`);
+  assert(!classified.calls[0]?.url.includes(secret) && !classified.calls[0]?.url.includes("key="), "classified call keeps the key out of the url");
+  const evaluated = await withFetch(
+    () => geminiResponse(sample.status, sample.body),
+    () => evaluateAnswer(twoSum, weakInput, geminiConfig),
+  );
+  assert(evaluated.calls.length === 1 && evaluated.result.verdict.source === "local", `${sample.failure} uses the local coach`);
+  assert(evaluated.result.notice?.includes(sample.notice) && evaluated.result.notice.includes("kept"), `${sample.failure} notice`);
+  assert(!evaluated.result.notice?.includes(secret), `${sample.failure} notice hides the key`);
+  assert(!JSON.stringify(evaluated.result.verdict).includes(secret), `${sample.failure} verdict hides the key`);
+}
+
+const restrictedDebrief = await withFetch(
+  () =>
+    geminiResponse(403, {
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: "Requests from this IP address are blocked.",
+        details: [{ reason: "API_KEY_IP_ADDRESS_BLOCKED" }],
+      },
+    }),
+  () =>
+    writeDebrief(
+      {
+        track: "technical",
+        topic: "dsa",
+        difficulty: "standard",
+        role: "backend",
+        focus: "",
+        turns: [
+          {
+            prompt: twoSum.prompt,
+            answer: weakInput.answer,
+            overall: 15,
+            strengths: [],
+            improvements: [],
+          },
+        ],
+      },
+      geminiConfig,
+    ),
+);
+assert(restrictedDebrief.calls.length === 1 && !restrictedDebrief.result.coach, "restricted key keeps the saved debrief");
+assert(
+  restrictedDebrief.result.notice?.includes("application restrictions") && restrictedDebrief.result.notice.includes("saved"),
+  "restricted key debrief notice",
+);
 
 const malformed = await withFetch(
   () =>
@@ -1223,6 +1417,129 @@ if (geminiRequest.ok) {
   assert(midQuota.calls.length === 2, "quota during codegen stops the remaining batches");
   assert(midQuota.result.manifest.source === "local", "mid-batch quota uses the local template");
   assert(!midQuota.result.manifest.files.some((entry) => entry.contents.includes("gemini-wrote-health")), "quota does not keep partial source");
+
+  const builderFailures = [
+    {
+      name: "invalid-key",
+      status: 400,
+      body: {
+        error: {
+          code: 400,
+          status: "INVALID_ARGUMENT",
+          message: "API key not valid. Please pass a valid API key.",
+          details: [{ reason: "API_KEY_INVALID", domain: "googleapis.com" }],
+        },
+      },
+      notice: "rejected",
+    },
+    {
+      name: "restricted-key",
+      status: 403,
+      body: {
+        error: {
+          code: 403,
+          status: "PERMISSION_DENIED",
+          message: "Requests from referer <empty> are blocked.",
+          details: [{ reason: "API_KEY_HTTP_REFERRER_BLOCKED" }],
+        },
+      },
+      notice: "application restrictions",
+    },
+    {
+      name: "api-disabled",
+      status: 403,
+      body: {
+        error: {
+          code: 403,
+          status: "PERMISSION_DENIED",
+          message: "Generative Language API has not been used in project before or it is disabled.",
+          details: [{ reason: "SERVICE_DISABLED" }],
+        },
+      },
+      notice: "Generative Language API",
+    },
+    {
+      name: "unsupported-model",
+      status: 404,
+      body: {
+        error: {
+          code: 404,
+          status: "NOT_FOUND",
+          message: "models/YOUR_MODEL_ID is not found for API version v1beta, or is not supported for generateContent.",
+        },
+      },
+      notice: "INTERVIEWVERSE_COACH_MODEL",
+    },
+    {
+      name: "malformed-request",
+      status: 400,
+      body: {
+        error: {
+          code: 400,
+          status: "INVALID_ARGUMENT",
+          message: 'Invalid JSON payload received. Unknown name "contentsx".',
+        },
+      },
+      notice: "request body",
+    },
+  ] as const;
+
+  for (const sample of builderFailures) {
+    const failed = await withFetch(
+      () => geminiResponse(sample.status, sample.body),
+      () => generateProject(expressRequest, geminiConfig),
+    );
+    assert(failed.calls.length === 1, `builder ${sample.name} is not retried`);
+    assert(failed.result.mode === "local" && failed.result.manifest.source === "local", `builder ${sample.name} uses the template`);
+    assert(failed.result.notice?.includes(sample.notice), `builder ${sample.name} notice`);
+    assert(
+      failed.result.manifest.files.some((entry) => entry.contents.includes("not an AI-generated project")),
+      `builder ${sample.name} is not labeled as AI`,
+    );
+    assert(!failed.result.manifest.files.some((entry) => entry.origin === "gemini"), `builder ${sample.name} has no gemini files`);
+  }
+
+  let restrictedStep = 0;
+  const midRestricted = await withFetch(
+    () => {
+      restrictedStep += 1;
+      if (restrictedStep === 1) return geminiText(analysis);
+      return geminiResponse(403, {
+        error: {
+          code: 403,
+          status: "PERMISSION_DENIED",
+          message: "Requests from referer <empty> are blocked.",
+          details: [{ reason: "API_KEY_HTTP_REFERRER_BLOCKED" }],
+        },
+      });
+    },
+    () => generateProject(expressRequest, geminiConfig),
+  );
+  assert(midRestricted.calls.length === 2, "restricted key during codegen stops the remaining batches");
+  assert(midRestricted.result.manifest.source === "local", "mid-batch restricted key uses the local template");
+  assert(
+    !midRestricted.result.manifest.files.some((entry) => entry.origin === "gemini"),
+    "restricted key does not keep partial source",
+  );
+
+  let placeholderCalls = 0;
+  const placeholderFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    placeholderCalls += 1;
+    return geminiResponse(500, {});
+  }) as typeof fetch;
+  try {
+    const stayed = await generateProject(expressRequest, placeholderBoth);
+    const stayedKey = await generateProject(expressRequest, placeholderKey);
+    assert(placeholderCalls === 0 && stayed.mode === "local" && stayed.manifest.source === "local", "placeholder config does not call Gemini");
+    assert(stayedKey.mode === "local" && stayedKey.manifest.source === "local", "placeholder key does not call Gemini");
+    assert(
+      stayed.manifest.files.some((entry) => entry.contents.includes("not an AI-generated project")),
+      "placeholder output stays a local template",
+    );
+  } finally {
+    globalThis.fetch = placeholderFetch;
+  }
 
   const broken = await withFetch(
     () => geminiResponse(200, { candidates: [{ content: { parts: [{ text: "not json" }] } }] }),

@@ -20,7 +20,15 @@ export const CODE_UNUSABLE_NOTICE =
 const GEMINI_NOTICES = {
   quota: "Gemini's free quota is exhausted. This starter was built from the local template.",
   "rate-limit": "Gemini rate-limited this request. This starter was built from the local template.",
-  "invalid-key": "The Gemini API key was rejected. This starter was built from the local template.",
+  "invalid-key":
+    "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY to the value that starts with AIza. This starter was built from the local template.",
+  "restricted-key":
+    "This Gemini API key blocks server calls. In Google AI Studio, set application restrictions to None. This starter was built from the local template.",
+  "api-disabled":
+    "The Generative Language API is not enabled for this key. Create a Gemini API key in Google AI Studio. This starter was built from the local template.",
+  "unsupported-model":
+    "Gemini does not recognize INTERVIEWVERSE_COACH_MODEL. Use a model ID from Google AI Studio. This starter was built from the local template.",
+  "malformed-request": "Gemini rejected the request body. This starter was built from the local template.",
 } as const;
 
 export type GenerateResult = {
@@ -105,9 +113,7 @@ function builderMessages(request: BuildRequest): ChatMessage[] {
 
 function noticeFor(error: unknown): string {
   if (error instanceof ModelCallError && error.provider === "gemini") {
-    if (error.failure === "quota" || error.failure === "rate-limit" || error.failure === "invalid-key") {
-      return GEMINI_NOTICES[error.failure];
-    }
+    if (error.failure in GEMINI_NOTICES) return GEMINI_NOTICES[error.failure as keyof typeof GEMINI_NOTICES];
   }
   return "Gemini did not answer. This starter was built from the local template.";
 }

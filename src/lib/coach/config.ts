@@ -48,8 +48,12 @@ function readBaseUrl(value: string | undefined, fallback: string): { url: string
   }
 }
 
+function isPlaceholder(value: string): boolean {
+  return /your[_-]|placeholder|changeme|example[_-]?key|paste|insert[_-]|replace[_-]?me/i.test(value);
+}
+
 function readModelId(value: string): string | null {
-  if (!/^[A-Za-z0-9._-]{1,80}$/.test(value)) return null;
+  if (isPlaceholder(value) || !/^[A-Za-z0-9._-]{1,80}$/.test(value)) return null;
   return value;
 }
 
@@ -72,17 +76,23 @@ function localRuntime(
 export function readCoachConfig(env: Env): CoachRuntime {
   const provider = clean(env.INTERVIEWVERSE_COACH_PROVIDER).toLowerCase();
   const apiKey = readApiKey(env.INTERVIEWVERSE_COACH_API_KEY);
+  const usableKey = isPlaceholder(apiKey) ? "" : apiKey;
   const selected: CoachProviderId | "" =
     provider === "gemini" || provider === "openai" ? provider : provider ? "" : apiKey ? "openai" : "";
   const defaults = PROVIDER_DEFAULTS[selected || "openai"];
   const base = readBaseUrl(env.INTERVIEWVERSE_COACH_BASE_URL, defaults.baseUrl);
-  const model = readModelId(clean(env.INTERVIEWVERSE_COACH_MODEL) || defaults.model);
+  const modelText = clean(env.INTERVIEWVERSE_COACH_MODEL) || defaults.model;
+  const model = readModelId(modelText);
 
   if (provider === "local") {
-    return localRuntime("forced-local", model ?? defaults.model, base.url, apiKey || null);
+    return localRuntime("forced-local", model ?? defaults.model, base.url, usableKey || null);
   }
 
-  if (!apiKey || !selected) {
+  if (provider === "gemini" && isPlaceholder(modelText)) {
+    return localRuntime("missing-model", "", base.url);
+  }
+
+  if (!usableKey || !selected) {
     return localRuntime(selected ? "no-api-key" : provider ? "unknown-provider" : "no-api-key", model ?? "", base.url);
   }
 
@@ -93,7 +103,7 @@ export function readCoachConfig(env: Env): CoachRuntime {
     mode: "ai",
     provider: selected,
     reason: "ready",
-    apiKey,
+    apiKey: usableKey,
     model,
     baseUrl: base.url,
   };

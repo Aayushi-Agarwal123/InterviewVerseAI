@@ -1,4 +1,12 @@
-export type ModelFailure = "rate-limit" | "quota" | "invalid-key" | "unavailable";
+export type ModelFailure =
+  | "rate-limit"
+  | "quota"
+  | "invalid-key"
+  | "restricted-key"
+  | "api-disabled"
+  | "unsupported-model"
+  | "malformed-request"
+  | "unavailable";
 
 export class ModelCallError extends Error {
   readonly failure: ModelFailure;

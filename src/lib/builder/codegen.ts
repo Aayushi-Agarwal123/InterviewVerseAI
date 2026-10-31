@@ -353,7 +353,13 @@ function fatal(error: unknown): boolean {
   return (
     error instanceof ModelCallError &&
     error.provider === "gemini" &&
-    (error.failure === "quota" || error.failure === "rate-limit" || error.failure === "invalid-key")
+    (error.failure === "quota" ||
+      error.failure === "rate-limit" ||
+      error.failure === "invalid-key" ||
+      error.failure === "restricted-key" ||
+      error.failure === "api-disabled" ||
+      error.failure === "unsupported-model" ||
+      error.failure === "malformed-request")
   );
 }
 

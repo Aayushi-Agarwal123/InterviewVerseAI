@@ -32,20 +32,35 @@ const GEMINI_NOTICES = {
   answer: {
     quota: "Gemini's free quota is exhausted. This answer was scored by the local coach, and your text was kept.",
     "rate-limit": "Gemini rate-limited this request. This answer was scored by the local coach, and your text was kept.",
-    "invalid-key": "The Gemini API key was rejected. This answer was scored by the local coach, and your text was kept.",
+    "invalid-key":
+      "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY to the value that starts with AIza. This answer was scored by the local coach, and your text was kept.",
+    "restricted-key":
+      "This Gemini API key blocks server calls. In Google AI Studio, set application restrictions to None. This answer was scored by the local coach, and your text was kept.",
+    "api-disabled":
+      "The Generative Language API is not enabled for this key. Create a Gemini API key in Google AI Studio. This answer was scored by the local coach, and your text was kept.",
+    "unsupported-model":
+      "Gemini does not recognize INTERVIEWVERSE_COACH_MODEL. Use a model ID from Google AI Studio. This answer was scored by the local coach, and your text was kept.",
+    "malformed-request":
+      "Gemini rejected the request body. This answer was scored by the local coach, and your text was kept.",
   },
   debrief: {
     quota: "Gemini's free quota is exhausted. The scores and answers are saved.",
     "rate-limit": "Gemini rate-limited this request. The scores and answers are saved.",
-    "invalid-key": "The Gemini API key was rejected. The scores and answers are saved.",
+    "invalid-key":
+      "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY to the value that starts with AIza. The scores and answers are saved.",
+    "restricted-key":
+      "This Gemini API key blocks server calls. In Google AI Studio, set application restrictions to None. The scores and answers are saved.",
+    "api-disabled":
+      "The Generative Language API is not enabled for this key. Create a Gemini API key in Google AI Studio. The scores and answers are saved.",
+    "unsupported-model":
+      "Gemini does not recognize INTERVIEWVERSE_COACH_MODEL. Use a model ID from Google AI Studio. The scores and answers are saved.",
+    "malformed-request": "Gemini rejected the request body. The scores and answers are saved.",
   },
 } as const;
 
 function noticeForModelError(error: unknown, kind: "answer" | "debrief"): string {
-  if (error instanceof ModelCallError && error.provider === "gemini") {
-    if (error.failure === "quota" || error.failure === "rate-limit" || error.failure === "invalid-key") {
-      return GEMINI_NOTICES[kind][error.failure];
-    }
+  if (error instanceof ModelCallError && error.provider === "gemini" && error.failure in GEMINI_NOTICES[kind]) {
+    return GEMINI_NOTICES[kind][error.failure as keyof (typeof GEMINI_NOTICES)["answer"]];
   }
   return kind === "answer" ? LOCAL_FALLBACK_NOTICE : DEBRIEF_FALLBACK_NOTICE;
 }
