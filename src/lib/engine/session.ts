@@ -1,4 +1,5 @@
 import type {
+  CoachVerdict,
   Question,
   Session,
   SessionConfig,
@@ -81,8 +82,19 @@ function turnFrom(
   difficulty: SessionConfig["difficulty"],
   followUpPrompt?: string,
   followUpAnswer?: string,
+  verdict?: CoachVerdict,
 ): Turn {
   const text = [answer, followUpAnswer].filter(Boolean).join("\n");
+  const coach =
+    verdict?.source === "ai" && verdict.sampleAnswer
+      ? {
+          source: "ai" as const,
+          strengths: verdict.strengths,
+          improvements: verdict.improvements,
+          tips: verdict.tips,
+          sampleAnswer: verdict.sampleAnswer,
+        }
+      : undefined;
   return {
     questionId: question.id,
     prompt: question.prompt,
@@ -90,7 +102,8 @@ function turnFrom(
     hintUsed,
     followUpPrompt,
     followUpAnswer,
-    score: scoreAnswer({ question, text, hintUsed, difficulty }),
+    score: verdict?.score ?? scoreAnswer({ question, text, hintUsed, difficulty }),
+    coach,
   };
 }
 
@@ -129,6 +142,7 @@ export function submitAnswer(
   session: Session,
   draft: string,
   now: string,
+  verdict?: CoachVerdict,
 ): Session {
   if (session.status !== "active") return session;
   const text = draft.trim();
@@ -144,21 +158,22 @@ export function submitAnswer(
       session.config.difficulty,
       session.active.followUpPrompt,
       text,
+      verdict,
     );
     return advance(session, turn, now);
   }
 
-  const preview = scoreAnswer({
-    question,
-    text,
-    hintUsed: session.active.hintUsed,
-    difficulty: session.config.difficulty,
-  });
-  const followUp = pickFollowUp(
-    question,
-    preview,
-    session.config.difficulty,
-  );
+  const preview =
+    verdict?.score ??
+    scoreAnswer({
+      question,
+      text,
+      hintUsed: session.active.hintUsed,
+      difficulty: session.config.difficulty,
+    });
+  const followUp = verdict
+    ? verdict.followUp?.trim() || undefined
+    : pickFollowUp(question, preview, session.config.difficulty);
   if (followUp) {
     return {
       ...session,
@@ -180,6 +195,9 @@ export function submitAnswer(
       text,
       session.active.hintUsed,
       session.config.difficulty,
+      undefined,
+      undefined,
+      verdict,
     ),
     now,
   );
@@ -205,11 +223,13 @@ export function endEarly(
   session: Session,
   draft: string,
   now: string,
+  verdict?: CoachVerdict,
 ): Session | null {
   if (session.status !== "active") return session;
   const question = getQuestion(session.questionIds[session.index]);
   let turns = session.turns;
   const pending = draft.trim();
+  const closing = verdict ? { ...verdict, followUp: undefined } : undefined;
 
   if (question && session.phase === "followup") {
     turns = [
@@ -221,6 +241,7 @@ export function endEarly(
         session.config.difficulty,
         session.active.followUpPrompt,
         pending || undefined,
+        closing,
       ),
     ];
   } else if (question && session.phase === "answering" && pending) {
@@ -231,6 +252,9 @@ export function endEarly(
         pending,
         session.active.hintUsed,
         session.config.difficulty,
+        undefined,
+        undefined,
+        closing,
       ),
     ];
   }

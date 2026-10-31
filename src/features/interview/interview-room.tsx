@@ -25,7 +25,14 @@ import {
   roleLabel,
   topicById,
 } from "@/lib/catalog";
-import type { Session, SessionPhase } from "@/lib/domain";
+import type { CoachVerdict, Session, SessionPhase } from "@/lib/domain";
+import {
+  requestDebrief,
+  requestEvaluation,
+  shouldScoreLocally,
+  UNREACHABLE_NOTICE,
+} from "@/lib/coach/browser";
+import { useCoachMode } from "@/components/shell/coach-mark";
 import {
   endEarly,
   markHint,
@@ -100,6 +107,9 @@ function LiveRound({
   const persona = personaFor(session.config.track);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [closingDraft, setClosingDraft] = useState("");
+  const [scoringLabel, setScoringLabel] = useState("");
+  const scoringRef = useRef(false);
+  const coach = useCoachMode();
 
   const persistDraft = useCallback((draft: string, index: number, phase: SessionPhase) => {
     const current = sessionRef.current;
@@ -109,14 +119,84 @@ function LiveRound({
     store.replace(withDraft(current, draft));
   }, [store]);
 
-  function finish(next: Session | null) {
+  async function commit(next: Session | null, notice?: string) {
     if (!next) {
       store.remove(session.id);
       onLeave();
       return;
     }
-    store.replace(next);
-    if (next.status === "completed") router.push(`/report/${next.id}`);
+    let saved = applyNotice(next, notice);
+    store.replace(saved);
+    if (
+      saved.status === "completed" &&
+      saved.report &&
+      saved.turns.some((turn) => turn.coach?.source === "ai") &&
+      !saved.report.coach
+    ) {
+      setScoringLabel("Writing the debrief.");
+      try {
+        const written = await requestDebrief(saved);
+        if (written) {
+          saved = { ...saved, report: { ...saved.report, coach: written } };
+          store.replace(saved);
+        }
+      } catch (error) {
+        saved = applyNotice(
+          saved,
+          error instanceof Error
+            ? error.message
+            : "The model did not write a round summary. The scores and answers are saved.",
+        );
+        store.replace(saved);
+      }
+    }
+    if (saved.status === "completed") router.push(`/report/${saved.id}`);
+  }
+
+  async function scoreText(draft: string, closing: boolean) {
+    if (scoringRef.current) return;
+    const current = sessionRef.current;
+    const pending = draft.trim();
+    if (!closing && !pending) return;
+    scoringRef.current = true;
+    let verdict: CoachVerdict | undefined;
+    let notice: string | undefined;
+    const askModel = !shouldScoreLocally() && Boolean(pending);
+    if (askModel) setScoringLabel(`${persona.name.split(" ")[0]} is reading this answer.`);
+    try {
+      if (askModel) {
+        try {
+          const result = await requestEvaluation({
+            questionId: current.questionIds[current.index] ?? "",
+            phase: current.phase === "followup" ? "followup" : "answering",
+            difficulty: current.config.difficulty,
+            role: current.config.role,
+            focus: current.config.focus,
+            hintUsed: current.active.hintUsed,
+            answer: pending,
+            priorAnswer: current.phase === "followup" ? current.active.answer : undefined,
+            followUpPrompt: current.active.followUpPrompt,
+            asked: current.turns.flatMap((turn) =>
+              [turn.prompt, turn.followUpPrompt].filter((item): item is string => Boolean(item)),
+            ),
+          });
+          verdict = result.verdict;
+          notice = result.notice;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          notice = message && !/fetch|network|abort|failed/i.test(message) ? message : UNREACHABLE_NOTICE;
+        }
+      }
+      const now = new Date().toISOString();
+      const next = closing
+        ? endEarly(current, draft, now, verdict)
+        : submitAnswer(current, draft, now, verdict);
+      liveDraft.current = "";
+      await commit(next, notice);
+    } finally {
+      scoringRef.current = false;
+      setScoringLabel("");
+    }
   }
 
   if (!question) {
@@ -129,13 +209,7 @@ function LiveRound({
         <Button
           className="mt-6 h-10"
           onClick={() =>
-            finish(
-              endEarly(
-                sessionRef.current,
-                liveDraft.current,
-                new Date().toISOString(),
-              ),
-            )
+            void scoreText(liveDraft.current, true)
           }
         >
           Score what you have
@@ -156,6 +230,7 @@ function LiveRound({
         <p className="text-xs font-medium tracking-[0.16em] text-copper uppercase">
           {topicById(session.config.topic).label} · {difficultyLabel(session.config.difficulty)} ·{" "}
           {roleLabel(session.config.role)}
+          {coach.ready ? ` · ${coach.label}` : ""}
         </p>
         <div className="mt-3">
           <Progress
@@ -167,6 +242,25 @@ function LiveRound({
           </Progress>
         </div>
       </header>
+
+      {scoringLabel ? (
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          {scoringLabel}
+        </p>
+      ) : null}
+
+      {session.coachNotice ? (
+        <p className="rounded-xl bg-accent px-4 py-3 text-sm leading-6 text-accent-foreground">
+          {session.coachNotice}
+          <button
+            type="button"
+            className="ml-3 underline underline-offset-4"
+            onClick={() => store.replace(applyNotice(session, undefined))}
+          >
+            Dismiss
+          </button>
+        </p>
+      ) : null}
 
       {session.config.focus ? (
         <p className="text-sm text-muted-foreground">
@@ -225,20 +319,21 @@ function LiveRound({
         index={session.index}
         hint={session.phase === "answering" ? hint : undefined}
         hintUsed={session.active.hintUsed}
+        busy={Boolean(scoringLabel)}
         onHint={() => store.replace(markHint(sessionRef.current))}
         onValue={(draft) => {
           liveDraft.current = draft;
         }}
         onDraft={persistDraft}
         onSubmit={(draft) => {
-          liveDraft.current = "";
-          finish(submitAnswer(sessionRef.current, draft, new Date().toISOString()));
+          void scoreText(draft, false);
         }}
       />
 
       <div className="flex items-center justify-between gap-3">
         <Button
           variant="ghost"
+          disabled={Boolean(scoringLabel)}
           onClick={() => {
             setClosingDraft(liveDraft.current);
             setConfirmEnd(true);
@@ -251,7 +346,12 @@ function LiveRound({
         </Link>
       </div>
 
-      <Dialog open={confirmEnd} onOpenChange={setConfirmEnd}>
+      <Dialog
+        open={confirmEnd}
+        onOpenChange={(open) => {
+          if (!scoringLabel) setConfirmEnd(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Close this round?</DialogTitle>
@@ -266,17 +366,16 @@ function LiveRound({
               Keep going
             </Button>
             <Button
+              disabled={Boolean(scoringLabel)}
               onClick={() => {
-                finish(
-                  endEarly(
-                    sessionRef.current,
-                    closingDraft,
-                    new Date().toISOString(),
-                  ),
-                );
+                if (willDiscard) {
+                  void commit(endEarly(sessionRef.current, "", new Date().toISOString()));
+                  return;
+                }
+                void scoreText(closingDraft, true);
               }}
             >
-              {willDiscard ? "Discard round" : "Score and close"}
+              {scoringLabel ? "Scoring…" : willDiscard ? "Discard round" : "Score and close"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -331,12 +430,23 @@ function Clock({
   );
 }
 
+function applyNotice(session: Session, notice?: string): Session {
+  if (!notice) {
+    if (!session.coachNotice) return session;
+    const next = { ...session };
+    delete next.coachNotice;
+    return next;
+  }
+  return { ...session, coachNotice: notice };
+}
+
 function Composer({
   initial,
   phase,
   index,
   hint,
   hintUsed,
+  busy,
   onHint,
   onValue,
   onDraft,
@@ -347,6 +457,7 @@ function Composer({
   index: number;
   hint?: string;
   hintUsed: boolean;
+  busy: boolean;
   onHint: () => void;
   onValue: (draft: string) => void;
   onDraft: (draft: string, index: number, phase: SessionPhase) => void;
@@ -366,6 +477,7 @@ function Composer({
       className="flex flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
+        if (busy) return;
         if (!draft.trim()) {
           setError("Write the answer before you send it.");
           return;
@@ -379,6 +491,7 @@ function Composer({
       <Textarea
         id="answer"
         value={draft}
+        disabled={busy}
         onChange={(event) => {
           setDraft(event.target.value);
           onValue(event.target.value);
@@ -404,12 +517,12 @@ function Composer({
         </p>
         <div className="flex gap-2">
           {hint && !hintUsed ? (
-            <Button type="button" variant="outline" onClick={onHint}>
+            <Button type="button" variant="outline" disabled={busy} onClick={onHint}>
               Show a nudge
             </Button>
           ) : null}
-          <Button type="submit" className="h-10 px-4">
-            Send answer
+          <Button type="submit" className="h-10 px-4" disabled={busy}>
+            {busy ? "Scoring…" : "Send answer"}
           </Button>
         </div>
       </div>

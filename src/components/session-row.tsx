@@ -32,6 +32,11 @@ export function SessionRow({ session }: { session: Session }) {
               Sample
             </span>
           ) : null}
+          {session.turns.some((turn) => turn.coach?.source === "ai") || session.report?.coach ? (
+            <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium tracking-wide text-secondary-foreground uppercase">
+              AI
+            </span>
+          ) : null}
         </span>
         <span className="mt-1 block truncate text-sm text-muted-foreground">
           {persona.name} · {difficultyLabel(session.config.difficulty)} ·{" "}

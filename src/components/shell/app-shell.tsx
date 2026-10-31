@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CoachMark } from "@/components/shell/coach-mark";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
@@ -118,13 +119,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Suspense fallback={<SideNavFallback />}>
             <PrimaryNav variant="side" />
           </Suspense>
-          <p className="mt-auto mb-6 text-xs leading-5 text-muted-foreground">
-            Rubric coach, on this device. Rounds stay in this browser.
-          </p>
+          <div className="mt-auto mb-6">
+            <CoachMark />
+          </div>
         </aside>
         <div className="flex min-w-0 flex-col">
-          <header className="flex items-center border-b border-border/80 px-5 py-4 md:hidden">
+          <header className="flex items-center justify-between gap-3 border-b border-border/80 px-5 py-4 md:hidden">
             <Brand />
+            <CoachMark compact />
           </header>
           <main id="studio-main" className="flex-1 px-5 py-8 pb-28 md:px-10 md:py-10 md:pb-16">
             {children}

@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ScoreFigure, ScoreMeter } from "@/components/score-meter";
+import { useCoachMode } from "@/components/shell/coach-mark";
+import { requestDebrief } from "@/lib/coach/browser";
 import {
   peekSession,
   useSessions,
@@ -58,6 +61,7 @@ export function ReportPage({ id }: { id: string }) {
   const report = session.report ?? buildReport(session);
   const persona = personaFor(session.config.track);
   const topic = topicById(session.config.topic);
+  const hasAi = session.turns.some((turn) => turn.coach?.source === "ai");
 
   return (
     <article className="mx-auto flex max-w-3xl flex-col gap-10">
@@ -81,6 +85,36 @@ export function ReportPage({ id }: { id: string }) {
             </p>
           </div>
         </div>
+        {session.coachNotice ? (
+          <p className="mt-4 rounded-xl bg-accent px-4 py-3 text-sm leading-6 text-accent-foreground">
+            {session.coachNotice}
+            <button
+              type="button"
+              className="ml-3 underline underline-offset-4"
+              onClick={() => {
+                const next = { ...session };
+                delete next.coachNotice;
+                store.replace(next);
+              }}
+            >
+              Dismiss
+            </button>
+          </p>
+        ) : null}
+        {report.coach ? (
+          <div className="mt-6 max-w-xl">
+            <h2 className="text-2xl tracking-tight">From the coach</h2>
+            <p className="mt-2 text-base leading-7 text-muted-foreground">{report.coach.narrative}</p>
+            <ul className="mt-3 flex flex-col gap-2 text-sm leading-6">
+              {report.coach.recommendations.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {hasAi && !report.coach ? (
+          <DebriefRetry session={session} />
+        ) : null}
         <p className="mt-4 text-sm text-muted-foreground">
           {topic.label} · {difficultyLabel(session.config.difficulty)} ·{" "}
           {roleLabel(session.config.role)} · {session.turns.length}{" "}
@@ -157,6 +191,72 @@ export function ReportPage({ id }: { id: string }) {
   );
 }
 
+function DebriefRetry({ session }: { session: Session }) {
+  const store = useSessions();
+  const coach = useCoachMode();
+  const [writing, setWriting] = useState(false);
+  const [message, setMessage] = useState("");
+
+  if (!coach.ready || coach.mode !== "ai") {
+    return (
+      <p className="mt-4 max-w-xl text-sm leading-6 text-muted-foreground">
+        The round summary was not written. The scores and the per-answer notes are saved.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <Button
+        variant="outline"
+        className="h-10"
+        disabled={writing}
+        onClick={() => {
+          setWriting(true);
+          setMessage("");
+          void requestDebrief(session)
+            .then((written) => {
+              if (!written || !session.report) {
+                setMessage("The model did not write a round summary. The scores and answers are saved.");
+                return;
+              }
+              const next = {
+                ...session,
+                report: { ...session.report, coach: written },
+              };
+              delete next.coachNotice;
+              store.replace(next);
+            })
+            .catch((error: unknown) => {
+              setMessage(
+                error instanceof Error
+                  ? error.message
+                  : "The model did not write a round summary. The scores and answers are saved.",
+              );
+            })
+            .finally(() => setWriting(false));
+        }}
+      >
+        {writing ? "Writing the debrief…" : "Write the round summary"}
+      </Button>
+      {message ? <p className="mt-3 text-sm leading-6 text-muted-foreground">{message}</p> : null}
+    </div>
+  );
+}
+
+function FeedbackList({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div>
+      <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">{label}</p>
+      <ul className="mt-2 flex flex-col gap-1">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function QuestionDebrief({
   index,
   turn,
@@ -189,11 +289,25 @@ function QuestionDebrief({
             </>
           ) : null}
         </div>
-        <ul className="flex flex-col gap-1">
-          {turn.score.notes.map((note) => (
-            <li key={note}>{note}</li>
-          ))}
-        </ul>
+        {turn.coach ? (
+          <div className="grid gap-4">
+            <FeedbackList label="What held" items={turn.coach.strengths} />
+            <FeedbackList label="What to change" items={turn.coach.improvements} />
+            <FeedbackList label="Try next" items={turn.coach.tips} />
+            <div>
+              <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
+                A stronger answer
+              </p>
+              <p className="mt-2 whitespace-pre-wrap">{turn.coach.sampleAnswer}</p>
+            </div>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {turn.score.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        )}
         {question ? (
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap gap-2">

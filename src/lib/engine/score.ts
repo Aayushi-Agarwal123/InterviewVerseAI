@@ -187,6 +187,16 @@ export function coachNotes(
   return notes.slice(0, 3);
 }
 
+export function weightedOverall(dimensions: Record<Dimension, number>): number {
+  return clampScore(
+    dimensions.relevance * 0.18 +
+      dimensions.structure * 0.2 +
+      dimensions.specificity * 0.18 +
+      dimensions.depth * 0.28 +
+      dimensions.communication * 0.16,
+  );
+}
+
 export function scoreAnswer(input: {
   question: Question;
   text: string;
@@ -207,13 +217,7 @@ export function scoreAnswer(input: {
     input.difficulty,
   );
 
-  const overall = clampScore(
-    dimensions.relevance * 0.18 +
-      dimensions.structure * 0.2 +
-      dimensions.specificity * 0.18 +
-      dimensions.depth * 0.28 +
-      dimensions.communication * 0.16,
-  );
+  const overall = weightedOverall(dimensions);
 
   const partial = {
     dimensions,

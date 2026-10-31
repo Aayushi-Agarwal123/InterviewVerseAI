@@ -54,6 +54,14 @@ export type AnswerScore = {
   notes: string[];
 };
 
+export type TurnCoach = {
+  source: "ai";
+  strengths: string[];
+  improvements: string[];
+  tips: string[];
+  sampleAnswer: string;
+};
+
 export type Turn = {
   questionId: string;
   prompt: string;
@@ -62,6 +70,17 @@ export type Turn = {
   followUpPrompt?: string;
   followUpAnswer?: string;
   score: AnswerScore;
+  coach?: TurnCoach;
+};
+
+export type CoachVerdict = {
+  source: "ai" | "local";
+  score: AnswerScore;
+  followUp?: string;
+  strengths: string[];
+  improvements: string[];
+  tips: string[];
+  sampleAnswer?: string;
 };
 
 export type SessionConfig = {
@@ -81,6 +100,12 @@ export type ActivePrompt = {
 
 export type SessionPhase = "answering" | "followup" | "done";
 
+export type ReportCoach = {
+  source: "ai";
+  narrative: string;
+  recommendations: string[];
+};
+
 export type Report = {
   overall: number;
   dimensions: Record<Dimension, number>;
@@ -89,6 +114,7 @@ export type Report = {
   strengths: string[];
   improvements: string[];
   nextPractice: string;
+  coach?: ReportCoach;
 };
 
 export type Session = {
@@ -106,6 +132,7 @@ export type Session = {
   status: "active" | "completed";
   sample?: boolean;
   report?: Report;
+  coachNotice?: string;
 };
 
 export const DIMENSIONS: Dimension[] = [
