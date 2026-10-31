@@ -1,6 +1,5 @@
 import { TOPICS } from "@/lib/catalog";
 import type {
-  AnswerScore,
   CoachVerdict,
   Difficulty,
   Dimension,
@@ -9,6 +8,7 @@ import type {
   Topic,
 } from "@/lib/domain";
 import { DIMENSIONS } from "@/lib/domain";
+import { weightedOverall } from "@/lib/engine/score";
 import { clampScore } from "@/lib/text";
 
 const DIFFICULTIES = new Set<Difficulty>(["warmup", "standard", "pressure"]);
@@ -86,50 +86,72 @@ function readScoreValue(value: unknown): number | null {
   return clampScore(number);
 }
 
-export function isAnswerScore(value: unknown): value is AnswerScore {
-  if (!isRecord(value)) return false;
-  if (!isRecord(value.dimensions)) return false;
-  for (const dimension of DIMENSIONS) {
-    if (readScoreValue(value.dimensions[dimension]) === null) return false;
-    if (value.dimensions[dimension] !== readScoreValue(value.dimensions[dimension])) return false;
+function readIdList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 12) return null;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") return null;
+    const id = item.trim();
+    if (!id || id.length > 80) return null;
+    ids.push(id);
   }
-  if (typeof value.overall !== "number" || !Number.isFinite(value.overall)) return false;
-  if (!Array.isArray(value.hitSignalIds) || !value.hitSignalIds.every((id) => typeof id === "string")) {
-    return false;
-  }
-  if (
-    !Array.isArray(value.missedSignalIds) ||
-    !value.missedSignalIds.every((id) => typeof id === "string")
-  ) {
-    return false;
-  }
-  if (!Array.isArray(value.notes) || !value.notes.every((note) => typeof note === "string")) {
-    return false;
-  }
-  return true;
+  return ids;
 }
 
-export function isCoachVerdict(value: unknown): value is CoachVerdict {
-  if (!isRecord(value)) return false;
-  if (value.source !== "ai" && value.source !== "local") return false;
-  if (!isAnswerScore(value.score)) return false;
-  if (value.followUp !== undefined && typeof value.followUp !== "string") return false;
+function readFollowUp(value: unknown): string | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text || text.length > 400) return undefined;
+  return text;
+}
+
+export function readCoachVerdict(value: unknown): CoachVerdict | null {
+  if (!isRecord(value)) return null;
+  if (value.source !== "ai" && value.source !== "local") return null;
+  if (!isRecord(value.score)) return null;
+  const dimensions = readDimensions(value.score.dimensions);
+  const hitSignalIds = readIdList(value.score.hitSignalIds);
+  const missedSignalIds = readIdList(value.score.missedSignalIds);
+  const notes = readStringList(value.score.notes, 0, 4, 800);
+  if (!dimensions || !hitSignalIds || !missedSignalIds || !notes) return null;
   const minimum = value.source === "ai" ? 1 : 0;
-  if (!readStringList(value.strengths, minimum, 4, 280)) return false;
-  if (!readStringList(value.improvements, minimum, 4, 280)) return false;
-  if (!readStringList(value.tips, minimum, 4, 280)) return false;
+  const strengths = readStringList(value.strengths, minimum, 4, 280);
+  const improvements = readStringList(value.improvements, minimum, 4, 280);
+  const tips = readStringList(value.tips, minimum, 4, 280);
+  if (!strengths || !improvements || !tips) return null;
+  const followUp = readFollowUp(value.followUp);
+  if (followUp === null) return null;
+  let sampleAnswer: string | undefined;
   if (value.source === "ai") {
     const sample = readString(value.sampleAnswer, 1200);
-    if (!sample || sample.length < 40) return false;
+    if (!sample || sample.length < 40) return null;
+    sampleAnswer = sample;
   }
-  return true;
+  return {
+    source: value.source,
+    score: {
+      dimensions,
+      overall: weightedOverall(dimensions),
+      hitSignalIds,
+      missedSignalIds,
+      notes,
+    },
+    followUp,
+    strengths,
+    improvements,
+    tips,
+    sampleAnswer,
+  };
 }
 
-export function isReportCoach(value: unknown): value is ReportCoach {
-  if (!isRecord(value) || value.source !== "ai") return false;
+export function readReportCoach(value: unknown): ReportCoach | null {
+  if (!isRecord(value) || value.source !== "ai") return null;
   const narrative = readString(value.narrative, 800);
-  if (!narrative || narrative.length < 40) return false;
-  return Boolean(readStringList(value.recommendations, 1, 4, 280));
+  if (!narrative || narrative.length < 40) return null;
+  const recommendations = readStringList(value.recommendations, 1, 4, 280);
+  if (!recommendations) return null;
+  return { source: "ai", narrative, recommendations };
 }
 
 export function parseEvaluateInput(

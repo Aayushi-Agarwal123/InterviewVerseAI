@@ -1,5 +1,5 @@
 import { QUESTIONS, getQuestion } from "../src/lib/questions";
-import { pickFollowUp, scoreAnswer } from "../src/lib/engine/score";
+import { pickFollowUp, scoreAnswer, weightedOverall } from "../src/lib/engine/score";
 import {
   createSession,
   endEarly,
@@ -12,7 +12,7 @@ import { publicCoachStatus, readCoachConfig } from "../src/lib/coach/config";
 import { evaluateAnswer, writeDebrief } from "../src/lib/coach/evaluate";
 import { evaluationMessages } from "../src/lib/coach/prompt";
 import { chooseFollowUp } from "../src/lib/coach/policy";
-import { parseEvaluateInput } from "../src/lib/coach/schema";
+import { parseEvaluateInput, readCoachVerdict } from "../src/lib/coach/schema";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -379,6 +379,121 @@ const localSummary = await writeDebrief(
   },
 );
 assert(!localSummary.coach, "local debrief does not invent a narrative");
+
+const crlf = readCoachConfig({
+  INTERVIEWVERSE_COACH_API_KEY: "sk-test\r\nX-Injected: 1",
+  INTERVIEWVERSE_COACH_PROVIDER: "openai",
+});
+assert(crlf.mode === "local" && crlf.reason === "no-api-key" && crlf.apiKey === null, "crlf key is ignored");
+assert(!JSON.stringify(publicCoachStatus(crlf)).includes("Injected"), "crlf status stays public");
+assert(hidden.baseUrl === "https://api.openai.com/v1", "default base url");
+
+const loopback = readCoachConfig({
+  INTERVIEWVERSE_COACH_API_KEY: secret,
+  INTERVIEWVERSE_COACH_PROVIDER: "openai",
+  INTERVIEWVERSE_COACH_BASE_URL: "http://127.0.0.1:11434/v1",
+});
+assert(loopback.mode === "ai" && loopback.baseUrl === "http://127.0.0.1:11434/v1", "loopback http stays");
+
+for (const bad of ["file:///tmp", "javascript:alert(1)", "https://user:pass@api.openai.com/v1"]) {
+  let calls = 0;
+  const cfg = readCoachConfig({
+    INTERVIEWVERSE_COACH_API_KEY: secret,
+    INTERVIEWVERSE_COACH_PROVIDER: "openai",
+    INTERVIEWVERSE_COACH_BASE_URL: bad,
+  });
+  assert(cfg.mode === "local" && cfg.reason === "unknown-provider" && cfg.apiKey === null, `bad url ${bad}`);
+  const result = await evaluateAnswer(
+    twoSum,
+    {
+      questionId: twoSum.id,
+      phase: "answering",
+      difficulty: "standard",
+      role: "backend",
+      focus: "",
+      hintUsed: false,
+      answer: "I would loop.",
+      asked: [],
+    },
+    cfg,
+    async () => {
+      calls += 1;
+      return "{}";
+    },
+  );
+  assert(calls === 0 && result.verdict.source === "local", `bad url does not call ${bad}`);
+}
+
+const dims = { relevance: 42, structure: 38, specificity: 30, depth: 28, communication: 40 };
+const sampleAnswer =
+  "I walk the array once with a hash map of value to index, check the complement before inserting, and return not found when no pair exists.";
+const hostile = readCoachVerdict({
+  source: "ai",
+  score: {
+    dimensions: dims,
+    overall: 900,
+    hitSignalIds: ["dsa-two-sum-hash"],
+    missedSignalIds: ["dsa-two-sum-complement"],
+    notes: ["Name the empty case."],
+  },
+  strengths: ["You named a loop."],
+  improvements: ["You never said how the pair is found."],
+  tips: ["Say the complexity before the walk."],
+  sampleAnswer,
+  followUp: "What happens if the same index would be used twice?",
+});
+assert(hostile, "hostile overall still yields a verdict");
+assert(hostile.score.overall === weightedOverall(dims), "overall is recomputed");
+assert(hostile.score.overall >= 0 && hostile.score.overall <= 100, "recomputed overall is in range");
+
+const huge = "x".repeat(100_000);
+assert(
+  readCoachVerdict({
+    source: "ai",
+    score: {
+      dimensions: dims,
+      overall: 10,
+      hitSignalIds: [],
+      missedSignalIds: [],
+      notes: [],
+    },
+    strengths: [huge],
+    improvements: ["You never said how the pair is found."],
+    tips: ["Say the complexity before the walk."],
+    sampleAnswer,
+  }) === null,
+  "a verdict with only an oversized strength is rejected",
+);
+const mixed = readCoachVerdict({
+  source: "ai",
+  score: {
+    dimensions: dims,
+    overall: 10,
+    hitSignalIds: [],
+    missedSignalIds: [],
+    notes: [],
+  },
+  strengths: ["You named a loop.", huge],
+  improvements: ["You never said how the pair is found."],
+  tips: ["Say the complexity before the walk."],
+  sampleAnswer,
+  followUp: `${"Q".repeat(401)}?`,
+});
+assert(mixed, "mixed strengths still yield a verdict");
+assert(mixed.strengths.length === 1 && mixed.strengths[0] === "You named a loop.", "oversized strength is dropped");
+assert(mixed.followUp === undefined, "oversized follow-up is dropped");
+assert(!JSON.stringify(mixed).includes(huge.slice(0, 40)), "stored verdict omits the oversized strength");
+
+const roundTrip = readCoachVerdict(aiWeak.verdict);
+assert(roundTrip, "server verdict stays readable");
+assert(roundTrip.score.overall === aiWeak.verdict.score.overall, "server overall is unchanged");
+assert(roundTrip.followUp === aiWeak.verdict.followUp, "server follow-up is unchanged");
+assert(roundTrip.sampleAnswer === aiWeak.verdict.sampleAnswer, "server sample is unchanged");
+const localRoundTrip = readCoachVerdict(localResult.verdict);
+assert(localRoundTrip, "local verdict stays readable");
+assert(localRoundTrip.score.overall === localResult.verdict.score.overall, "local overall is unchanged");
+assert(localRoundTrip.followUp === localResult.verdict.followUp, "local follow-up is unchanged");
+assert(!localRoundTrip.sampleAnswer, "local round trip has no sample");
 
 console.log(
   `engine ok: ${QUESTIONS.length} prompts, strong ${strong.overall}, weak ${weak.overall}, sample ${sample.report?.overall}`,

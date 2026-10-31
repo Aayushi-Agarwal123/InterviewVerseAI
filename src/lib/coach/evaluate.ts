@@ -8,9 +8,9 @@ import { debriefMessages, evaluationMessages, type ChatMessage } from "@/lib/coa
 import { getModelProvider } from "@/lib/coach/providers";
 import {
   extractJson,
-  isCoachVerdict,
-  isReportCoach,
+  readCoachVerdict,
   readDimensions,
+  readReportCoach,
   readStringList,
   type DebriefInput,
   type EvaluateInput,
@@ -93,7 +93,7 @@ function materialize(question: Question, input: EvaluateInput, raw: Record<strin
     tips,
     sampleAnswer,
   };
-  return isCoachVerdict(verdict) ? verdict : null;
+  return readCoachVerdict(verdict);
 }
 
 async function completeWithConfig(
@@ -152,8 +152,7 @@ function materializeDebrief(raw: Record<string, unknown>): ReportCoach | null {
   const narrative = typeof raw.narrative === "string" ? raw.narrative.trim() : "";
   const recommendations = readStringList(raw.recommendations, 1, 4, 280);
   if (!recommendations || narrative.length < 40 || narrative.length > 800) return null;
-  const coach: ReportCoach = { source: "ai", narrative, recommendations };
-  return isReportCoach(coach) ? coach : null;
+  return readReportCoach({ source: "ai", narrative, recommendations });
 }
 
 export async function writeDebrief(

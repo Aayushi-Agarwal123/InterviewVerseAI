@@ -21,14 +21,30 @@ function clean(value: string | undefined): string {
   return value?.trim() ?? "";
 }
 
+function readApiKey(value: string | undefined): string {
+  const key = clean(value);
+  if (!key || /[\r\n]/.test(key)) return "";
+  return key;
+}
+
+function readBaseUrl(value: string | undefined): { url: string; ok: boolean } {
+  const raw = clean(value) || DEFAULT_BASE_URL;
+  try {
+    const url = new URL(raw);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+      return { url: DEFAULT_BASE_URL, ok: false };
+    }
+    return { url: url.toString().replace(/\/+$/, ""), ok: true };
+  } catch {
+    return { url: DEFAULT_BASE_URL, ok: false };
+  }
+}
+
 export function readCoachConfig(env: Env): CoachRuntime {
   const provider = clean(env.INTERVIEWVERSE_COACH_PROVIDER).toLowerCase();
-  const apiKey = clean(env.INTERVIEWVERSE_COACH_API_KEY);
+  const apiKey = readApiKey(env.INTERVIEWVERSE_COACH_API_KEY);
   const model = clean(env.INTERVIEWVERSE_COACH_MODEL) || DEFAULT_MODEL;
-  const baseUrl = (clean(env.INTERVIEWVERSE_COACH_BASE_URL) || DEFAULT_BASE_URL).replace(
-    /\/+$/,
-    "",
-  );
+  const base = readBaseUrl(env.INTERVIEWVERSE_COACH_BASE_URL);
 
   if (provider === "local") {
     return {
@@ -37,7 +53,7 @@ export function readCoachConfig(env: Env): CoachRuntime {
       reason: "forced-local",
       apiKey: apiKey || null,
       model,
-      baseUrl,
+      baseUrl: base.url,
     };
   }
 
@@ -49,18 +65,18 @@ export function readCoachConfig(env: Env): CoachRuntime {
       reason: "no-api-key",
       apiKey: null,
       model,
-      baseUrl,
+      baseUrl: base.url,
     };
   }
 
-  if (selected !== "openai") {
+  if (selected !== "openai" || !base.ok) {
     return {
       mode: "local",
       provider: null,
       reason: "unknown-provider",
       apiKey: null,
       model,
-      baseUrl,
+      baseUrl: base.url,
     };
   }
 
@@ -70,7 +86,7 @@ export function readCoachConfig(env: Env): CoachRuntime {
     reason: "ready",
     apiKey,
     model,
-    baseUrl,
+    baseUrl: base.url,
   };
 }
 

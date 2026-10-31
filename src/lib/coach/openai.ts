@@ -34,12 +34,18 @@ async function postCompletion(request: ModelRequest, jsonMode: boolean): Promise
   });
 }
 
+async function discard(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
+
 export async function completeOpenAi(request: ModelRequest): Promise<string> {
   let response = await postCompletion(request, true);
   if (response.status === 400) {
+    await discard(response);
     response = await postCompletion(request, false);
   }
   if (!response.ok) {
+    await discard(response);
     throw new Error(`Model request failed (${response.status}).`);
   }
   const payload = (await response.json()) as {

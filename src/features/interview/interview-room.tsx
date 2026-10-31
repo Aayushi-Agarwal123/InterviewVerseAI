@@ -188,11 +188,27 @@ function LiveRound({
         }
       }
       const now = new Date().toISOString();
-      const next = closing
-        ? endEarly(current, draft, now, verdict)
-        : submitAnswer(current, draft, now, verdict);
-      liveDraft.current = "";
-      await commit(next, notice);
+      const score = (nextVerdict?: CoachVerdict) =>
+        closing
+          ? endEarly(current, draft, now, nextVerdict)
+          : submitAnswer(current, draft, now, nextVerdict);
+      let next: Session | null = null;
+      try {
+        next = score(verdict);
+      } catch {
+        notice = UNREACHABLE_NOTICE;
+        try {
+          next = score();
+        } catch {
+          return;
+        }
+      }
+      try {
+        await commit(next, notice);
+      } catch {
+        return;
+      }
+      if (next) liveDraft.current = "";
     } finally {
       scoringRef.current = false;
       setScoringLabel("");
@@ -431,13 +447,14 @@ function Clock({
 }
 
 function applyNotice(session: Session, notice?: string): Session {
-  if (!notice) {
+  const text = notice?.trim().slice(0, 400) ?? "";
+  if (!text) {
     if (!session.coachNotice) return session;
     const next = { ...session };
     delete next.coachNotice;
     return next;
   }
-  return { ...session, coachNotice: notice };
+  return { ...session, coachNotice: text };
 }
 
 function Composer({

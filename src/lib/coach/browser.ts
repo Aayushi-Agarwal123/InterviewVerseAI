@@ -1,5 +1,5 @@
 import type { CoachVerdict, ReportCoach, Session } from "@/lib/domain";
-import { isCoachVerdict, isReportCoach, type DebriefInput, type EvaluateInput } from "@/lib/coach/schema";
+import { readCoachVerdict, readReportCoach, type DebriefInput, type EvaluateInput } from "@/lib/coach/schema";
 import { knownLocalMode } from "@/lib/coach/status";
 
 export const UNREACHABLE_NOTICE =
@@ -14,6 +14,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function readNotice(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim().slice(0, 400);
+  return text || undefined;
+}
+
 export function shouldScoreLocally(): boolean {
   return knownLocalMode();
 }
@@ -26,15 +32,13 @@ export async function requestEvaluation(input: EvaluateInput): Promise<Evaluatio
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = isRecord(body) && typeof body.error === "string" ? body.error : UNREACHABLE_NOTICE;
-    throw new Error(error);
+    const error = isRecord(body) ? readNotice(body.error) : undefined;
+    throw new Error(error ?? UNREACHABLE_NOTICE);
   }
-  if (!isRecord(body) || !isCoachVerdict(body.verdict)) {
-    throw new Error(UNREACHABLE_NOTICE);
-  }
-  const notice =
-    body.fellBack === true && typeof body.notice === "string" ? body.notice : undefined;
-  return { verdict: body.verdict, notice };
+  const verdict = isRecord(body) ? readCoachVerdict(body.verdict) : null;
+  if (!verdict) throw new Error(UNREACHABLE_NOTICE);
+  const notice = isRecord(body) && body.fellBack === true ? readNotice(body.notice) : undefined;
+  return { verdict, notice };
 }
 
 export function debriefInputFrom(session: Session): DebriefInput {
@@ -64,8 +68,9 @@ export async function requestDebrief(session: Session): Promise<ReportCoach | nu
   });
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok || !isRecord(body)) throw new Error(UNREACHABLE_NOTICE);
-  if (body.fellBack === true) throw new Error(typeof body.notice === "string" ? body.notice : UNREACHABLE_NOTICE);
+  if (body.fellBack === true) throw new Error(readNotice(body.notice) ?? UNREACHABLE_NOTICE);
   if (!body.coach) return null;
-  if (!isReportCoach(body.coach)) throw new Error(UNREACHABLE_NOTICE);
-  return body.coach;
+  const coach = readReportCoach(body.coach);
+  if (!coach) throw new Error(UNREACHABLE_NOTICE);
+  return coach;
 }
