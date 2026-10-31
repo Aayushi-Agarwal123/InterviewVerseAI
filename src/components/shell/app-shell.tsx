@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/", label: "Studio" },
   { href: "/practice", label: "Practice" },
   { href: "/progress", label: "Progress" },
+  { href: "/builder", label: "AI Project Builder" },
 ];
 
 function isCurrent(pathname: string, href: string): boolean {
@@ -46,7 +47,7 @@ function PrimaryNav({ variant }: { variant: "side" | "bottom" }) {
   const pathname = usePathname();
   if (variant === "bottom") {
     return (
-      <ul className="grid grid-cols-3">
+      <ul className="grid grid-cols-4">
         {LINKS.map((link) => {
           const current = isCurrent(pathname, link.href);
           return (
@@ -55,7 +56,7 @@ function PrimaryNav({ variant }: { variant: "side" | "bottom" }) {
                 href={link.href}
                 aria-current={current ? "page" : undefined}
                 className={cn(
-                  "flex h-14 items-center justify-center text-sm",
+                  "flex h-16 items-center justify-center px-1 text-center text-[11px] leading-tight",
                   current ? "font-medium text-foreground" : "text-muted-foreground",
                 )}
               >
@@ -128,7 +129,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Brand />
             <CoachMark compact />
           </header>
-          <main id="studio-main" className="flex-1 px-5 py-8 pb-28 md:px-10 md:py-10 md:pb-16">
+          <main id="studio-main" className="flex-1 px-5 py-8 pb-32 md:px-10 md:py-10 md:pb-16">
             {children}
           </main>
         </div>
@@ -139,11 +140,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         <Suspense
           fallback={
-            <ul className="grid grid-cols-3" aria-hidden>
+            <ul className="grid grid-cols-4" aria-hidden>
               {LINKS.map((link) => (
                 <li
                   key={link.href}
-                  className="flex h-14 items-center justify-center text-sm text-muted-foreground"
+                  className="flex h-16 items-center justify-center px-1 text-center text-[11px] leading-tight text-muted-foreground"
                 >
                   {link.label}
                 </li>

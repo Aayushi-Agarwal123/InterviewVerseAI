@@ -1,0 +1,147 @@
+import type { CoachRuntime } from "@/lib/coach/config";
+import { ModelCallError } from "@/lib/coach/errors";
+import { completeGemini } from "@/lib/coach/gemini";
+import type { ChatMessage } from "@/lib/coach/prompt";
+import { assembleManifest, localAnalysis, type ProjectAnalysis } from "@/lib/builder/manifest";
+import { STACK_LABELS, type BuildRequest, type ProjectManifest, type ProjectModule } from "@/lib/builder/types";
+
+export const BUILDER_UNREADABLE_NOTICE =
+  "The Gemini reply could not be read. This starter was built from the local template.";
+
+const GEMINI_NOTICES = {
+  quota: "Gemini's free quota is exhausted. This starter was built from the local template.",
+  "rate-limit": "Gemini rate-limited this request. This starter was built from the local template.",
+  "invalid-key": "The Gemini API key was rejected. This starter was built from the local template.",
+} as const;
+
+export type GenerateResult = {
+  mode: "gemini" | "local";
+  notice?: string;
+  manifest: ProjectManifest;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function extractJson(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const source = fenced?.[1] ?? text;
+  const start = source.indexOf("{");
+  const end = source.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(source.slice(start, end + 1)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function readList(value: unknown, min: number, max: number, length: number): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const items = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter((item) => item.length >= 4 && item.length <= length)
+    .slice(0, max);
+  if (items.length < min) return null;
+  return items;
+}
+
+export function parseAnalysis(text: string): ProjectAnalysis | null {
+  const parsed = extractJson(text);
+  if (!isRecord(parsed)) return null;
+  const objective = typeof parsed.objective === "string" ? parsed.objective.replace(/\s+/g, " ").trim() : "";
+  if (objective.length < 12 || objective.length > 400) return null;
+  const functionalRequirements = readList(parsed.functionalRequirements, 1, 8, 240);
+  const nonFunctionalRequirements = readList(parsed.nonFunctionalRequirements, 1, 6, 240);
+  if (!functionalRequirements || !nonFunctionalRequirements || !Array.isArray(parsed.modules)) return null;
+  const modules: ProjectModule[] = [];
+  for (const entry of parsed.modules) {
+    if (!isRecord(entry) || typeof entry.name !== "string" || typeof entry.purpose !== "string") return null;
+    const name = entry.name.trim();
+    const purpose = entry.purpose.trim();
+    if (name.length < 2 || name.length > 40 || purpose.length < 4 || purpose.length > 200) return null;
+    modules.push({ name, purpose });
+    if (modules.length === 8) break;
+  }
+  if (modules.length === 0) return null;
+  return { objective, functionalRequirements, nonFunctionalRequirements, modules };
+}
+
+function builderMessages(request: BuildRequest): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: [
+        "You analyze a software brief and return JSON only.",
+        "Do not write source code, file trees, secrets, or package manifests.",
+        "Do not claim a feature is already implemented.",
+        'JSON shape: {"objective":"","functionalRequirements":[""],"nonFunctionalRequirements":[""],"modules":[{"name":"","purpose":""}]}',
+      ].join(" "),
+    },
+    {
+      role: "user",
+      content: [
+        `Project name: ${request.name}`,
+        `Selected stack: ${STACK_LABELS[request.stack]}`,
+        `Brief: ${request.description}`,
+        request.extras ? `Additional requirements: ${request.extras}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+  ];
+}
+
+function noticeFor(error: unknown): string {
+  if (error instanceof ModelCallError && error.provider === "gemini") {
+    if (error.failure === "quota" || error.failure === "rate-limit" || error.failure === "invalid-key") {
+      return GEMINI_NOTICES[error.failure];
+    }
+  }
+  return "Gemini did not answer. This starter was built from the local template.";
+}
+
+export function geminiBuilderReady(config: CoachRuntime): boolean {
+  return config.mode === "ai" && config.provider === "gemini" && Boolean(config.apiKey) && Boolean(config.model);
+}
+
+export async function generateProject(
+  request: BuildRequest,
+  config: CoachRuntime,
+  fetchImpl?: typeof fetch,
+): Promise<GenerateResult> {
+  const local = localAnalysis(request);
+  if (!geminiBuilderReady(config) || !config.apiKey) {
+    return { mode: "local", manifest: assembleManifest(request, local, "local") };
+  }
+  try {
+    const text = await completeGemini(
+      {
+        apiKey: config.apiKey,
+        model: config.model,
+        baseUrl: config.baseUrl,
+        temperature: 0.2,
+        messages: builderMessages(request),
+        signal: AbortSignal.timeout(25_000),
+      },
+      fetchImpl,
+    );
+    const analysis = parseAnalysis(text);
+    if (!analysis) {
+      return {
+        mode: "local",
+        notice: BUILDER_UNREADABLE_NOTICE,
+        manifest: assembleManifest(request, local, "local"),
+      };
+    }
+    return { mode: "gemini", manifest: assembleManifest(request, analysis, "gemini") };
+  } catch (error) {
+    return {
+      mode: "local",
+      notice: noticeFor(error),
+      manifest: assembleManifest(request, local, "local"),
+    };
+  }
+}

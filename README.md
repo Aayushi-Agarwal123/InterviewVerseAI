@@ -35,6 +35,12 @@ INTERVIEWVERSE_COACH_BASE_URL=
 
 Gemini uses the Developer API's `generateContent` request, not the OpenAI chat format. The key is sent as `x-goog-api-key` and is not put in the URL. A rate limit, quota error, rejected key, or unreadable reply is not retried. The answer is scored by the local rubric and kept. The sidebar says **Gemini AI Coach** or **Local Coach**, and says when answers are sent to Google.
 
+## AI Project Builder
+
+Open **AI Project Builder** in the navigation. Describe a product, pick a stack, and download a ZIP. The four starters are React + Vite + TypeScript, Next.js + TypeScript, Node.js + Express + TypeScript, and React + Express + MongoDB.
+
+Gemini is used only when the server is already in Gemini mode with a model ID. It writes a requirements summary. The files still come from the starter template, and the page says so. With no Gemini key, or when Gemini fails, the **Local Template Builder** creates the same kind of archive and does not call it AI-generated. The ZIP is built in memory. It has no `node_modules` and no API key. Generated code is not installed or run on this server.
+
 OpenAI remains available. Set `INTERVIEWVERSE_COACH_PROVIDER=openai` and a model such as `gpt-4o-mini`. Local mode does not invent a sample answer or a model debrief.
 
 ```bash

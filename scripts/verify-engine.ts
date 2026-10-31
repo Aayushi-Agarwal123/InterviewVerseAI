@@ -8,6 +8,12 @@ import {
 } from "../src/lib/engine/session";
 import { buildSampleSession } from "../src/lib/engine/sample";
 import { currentStreak } from "../src/lib/format";
+import { unzipSync, strFromU8 } from "fflate";
+import { generateProject } from "../src/lib/builder/generate";
+import { sealManifest } from "../src/lib/builder/manifest";
+import { LIMITS, safeRelativePath } from "../src/lib/builder/paths";
+import { parseBuildRequest, resolveStack } from "../src/lib/builder/request";
+import { zipProject } from "../src/lib/builder/zip";
 import { publicCoachStatus, readCoachConfig } from "../src/lib/coach/config";
 import { ModelCallError } from "../src/lib/coach/errors";
 import { evaluateAnswer, writeDebrief } from "../src/lib/coach/evaluate";
@@ -853,6 +859,183 @@ const debriefQuota = await withFetch(
 );
 assert(debriefQuota.calls.length === 1 && !debriefQuota.result.coach, "debrief quota keeps the saved scores");
 assert(debriefQuota.result.notice?.includes("quota") && debriefQuota.result.notice.includes("saved"), "debrief quota notice");
+
+const builderBrief =
+  "Create an online interview preparation platform with practice rounds, feedback, and score tracking.";
+assert(!parseBuildRequest({ name: "A", description: builderBrief, frontend: "react-vite", backend: "none", database: "none" }).ok, "short project name");
+assert(!parseBuildRequest({ name: "Interview Prep", description: "too short", frontend: "react-vite", backend: "none", database: "none" }).ok, "short project description");
+assert(safeRelativePath("../etc/passwd") === null, "reject parent traversal");
+assert(safeRelativePath("/tmp/app.ts") === null, "reject absolute path");
+assert(safeRelativePath("src/../../secret.ts") === null, "reject nested traversal");
+assert(safeRelativePath("node_modules/left-pad/index.js") === null, "reject node_modules");
+assert(safeRelativePath(".env") === null, "reject env file");
+assert(safeRelativePath(".env.example") === ".env.example", "allow env example");
+assert(safeRelativePath("src/index.ts") === "src/index.ts", "allow source path");
+assert(!resolveStack("next", "express", "none").ok, "next does not take express");
+const viteStack = resolveStack("react-vite", "none", "none");
+const nextStack = resolveStack("next", "none", "none");
+const expressStack = resolveStack("none", "express", "none");
+const expressMongo = resolveStack("none", "express", "mongodb");
+const fullStack = resolveStack("react-vite", "express", "mongodb");
+assert(viteStack.ok && viteStack.stack === "react-vite", "vite stack");
+assert(nextStack.ok && nextStack.stack === "next", "next stack");
+assert(expressStack.ok && expressStack.stack === "express", "express stack");
+assert(expressMongo.ok && expressMongo.stack === "express", "express can select mongo");
+assert(fullStack.ok && fullStack.stack === "fullstack", "fullstack stack");
+
+const stacks = [
+  { frontend: "react-vite", backend: "none", database: "none", dependency: "vite", forbidden: "express" },
+  { frontend: "next", backend: "none", database: "none", dependency: "next", forbidden: "mongodb" },
+  { frontend: "none", backend: "express", database: "none", dependency: "express", forbidden: "react" },
+  { frontend: "none", backend: "express", database: "mongodb", dependency: "mongodb", forbidden: "react" },
+  { frontend: "react-vite", backend: "express", database: "mongodb", dependency: "mongodb", forbidden: "next" },
+] as const;
+
+let builderFetches = 0;
+const builderFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  builderFetches += 1;
+  throw new Error("builder should not call fetch");
+}) as typeof fetch;
+try {
+  for (const stack of stacks) {
+    const parsed = parseBuildRequest({
+      name: "Interview Prep",
+      description: builderBrief,
+      extras: "Keep the first version small.",
+      ...stack,
+    });
+    assert(parsed.ok, `stack parses ${stack.frontend}`);
+    if (!parsed.ok) continue;
+    const built = await generateProject(parsed.value, readCoachConfig({}));
+    assert(built.mode === "local" && built.manifest.source === "local", `local source ${parsed.value.stack}`);
+    assert(built.manifest.files.some((entry) => entry.path === "README.md"), "readme exists");
+    assert(built.manifest.files.some((entry) => entry.contents.includes("not an AI-generated project")), "local label");
+    assert(!built.manifest.files.some((entry) => entry.path.split("/").includes("node_modules")), "no installed modules");
+    assert(built.manifest.dependencies.includes(stack.dependency), `dependency ${stack.dependency}`);
+    assert(!built.manifest.dependencies.includes(stack.forbidden), `does not depend on ${stack.forbidden}`);
+    assert(sealManifest(built.manifest)?.files.length === built.manifest.files.length, "manifest seals");
+    const readme = built.manifest.files.find((entry) => entry.path === "README.md")?.contents ?? "";
+    assert(readme.includes("What this starter does not include"), "honest limits");
+    assert(!readme.includes(secret), "local archive omits the coach key");
+  }
+  assert(builderFetches === 0, "missing key does not call gemini");
+} finally {
+  globalThis.fetch = builderFetch;
+}
+
+const full = parseBuildRequest({
+  name: "Interview Prep",
+  description: `AIzaSyA123456789012345678901234 ${builderBrief}`,
+  extras: "",
+  frontend: "react-vite",
+  backend: "express",
+  database: "mongodb",
+});
+assert(full.ok, "fullstack request");
+if (full.ok) {
+  assert(!full.value.description.includes("AIza"), "brief redacts a pasted key");
+  const built = await generateProject(full.value, readCoachConfig({ INTERVIEWVERSE_COACH_API_KEY: secret }));
+  const joined = built.manifest.files.map((entry) => entry.contents).join("\n");
+  assert(joined.includes("GET /health") || joined.includes('"/health"') || joined.includes("/health"), "health route");
+  assert(joined.includes("mongodb"), "mongo driver");
+  assert(!joined.includes("AIza"), "zip sources omit the pasted key");
+  assert(!joined.includes(secret), "starter omits the server key");
+  const env = built.manifest.files.find((entry) => entry.path === "server/.env.example")?.contents ?? "";
+  assert(env.includes("MONGODB_URI=\n") && !env.includes("mongodb+srv"), "env example is empty");
+  const zipped = zipProject(built.manifest.slug, built.manifest.files, secret);
+  assert(zipped, "zip bytes");
+  if (zipped) {
+    const opened = unzipSync(zipped);
+    const names = Object.keys(opened);
+    assert(names.length === built.manifest.files.length, "zip preserves every file");
+    assert(names.every((entry) => entry.startsWith(`${built.manifest.slug}/`)), "zip keeps the project folder");
+    const health = names.find((entry) => entry.endsWith("server/src/index.ts"));
+    assert(health && strFromU8(opened[health]).includes("/health"), "zip contains the health route");
+    const readmeName = `${built.manifest.slug}/README.md`;
+    assert(strFromU8(opened[readmeName]).includes("Interview Prep"), "zip readme names the project");
+    assert(!names.some((entry) => entry.includes("node_modules")), "zip skips node_modules");
+    assert(!strFromU8(zipped).includes(secret), "zip bytes omit the server key");
+  }
+}
+
+const oversized = sealManifest({
+  source: "local",
+  name: "Interview Prep",
+  slug: "interview-prep",
+  stack: "express",
+  files: Array.from({ length: LIMITS.files + 1 }, (_, index) => ({ path: `src/file-${index}.ts`, contents: "export {}\n" })),
+});
+assert(oversized === null, "file count limit");
+const hugeFile = sealManifest({
+  source: "local",
+  name: "Interview Prep",
+  slug: "interview-prep",
+  stack: "express",
+  files: [{ path: "src/index.ts", contents: "x".repeat(LIMITS.fileChars + 1) }],
+});
+assert(hugeFile === null, "file size limit");
+
+const geminiRequest = parseBuildRequest({
+  name: "Interview Prep",
+  description: builderBrief,
+  extras: "Mention ownership.",
+  frontend: "none",
+  backend: "express",
+  database: "none",
+});
+assert(geminiRequest.ok, "gemini builder request");
+if (geminiRequest.ok) {
+  const analysis = JSON.stringify({
+    objective: "Help candidates practice interviews and review their scores.",
+    functionalRequirements: ["Practice a written interview round."],
+    nonFunctionalRequirements: ["Run locally without a paid account."],
+    modules: [{ name: "Practice desk", purpose: "Holds the brief for a later build." }],
+  });
+  const generated = await withFetch(
+    () =>
+      geminiResponse(200, {
+        candidates: [{ content: { parts: [{ text: analysis }] }, role: "model" }],
+      }),
+    () => generateProject(geminiRequest.value, geminiConfig),
+  );
+  assert(generated.calls.length === 1, "builder calls gemini once");
+  assert(generated.calls[0]?.url.includes(":generateContent"), "builder uses generateContent");
+  assert(!generated.calls[0]?.url.includes(secret), "builder keeps the key out of the url");
+  const builderBody = JSON.parse(String(generated.calls[0]?.init.body)) as {
+    systemInstruction?: { parts?: { text?: string }[] };
+  };
+  assert(!builderBody.systemInstruction?.parts?.[0]?.text?.includes("Arun Mehta"), "builder prompt is not an interview");
+  assert(generated.result.mode === "gemini" && generated.result.manifest.source === "gemini", "gemini summary");
+  assert(generated.result.manifest.objective.includes("practice interviews"), "gemini objective kept");
+  assert(
+    generated.result.manifest.files.some((entry) => entry.contents.includes("Gemini wrote the requirements summary")),
+    "gemini attribution",
+  );
+  assert(generated.result.manifest.files.some((entry) => entry.path === "src/index.ts"), "template files remain");
+
+  const quotaProject = await withFetch(
+    () =>
+      geminiResponse(429, {
+        error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "You exceeded your current quota." },
+      }),
+    () => generateProject(geminiRequest.value, geminiConfig),
+  );
+  assert(quotaProject.calls.length === 1, "builder quota is not retried");
+  assert(quotaProject.result.mode === "local" && quotaProject.result.manifest.source === "local", "quota uses the template");
+  assert(quotaProject.result.notice?.includes("quota"), "builder quota notice");
+  assert(
+    quotaProject.result.manifest.files.some((entry) => entry.contents.includes("not an AI-generated project")),
+    "quota result is not labeled as AI",
+  );
+
+  const broken = await withFetch(
+    () => geminiResponse(200, { candidates: [{ content: { parts: [{ text: "not json" }] } }] }),
+    () => generateProject(geminiRequest.value, geminiConfig),
+  );
+  assert(broken.calls.length === 1 && broken.result.manifest.source === "local", "malformed builder reply falls back");
+  assert(broken.result.notice?.includes("could not be read"), "malformed builder notice");
+}
 
 console.log(
   `engine ok: ${QUESTIONS.length} prompts, strong ${strong.overall}, weak ${weak.overall}, sample ${sample.report?.overall}`,
