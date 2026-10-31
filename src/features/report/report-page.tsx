@@ -1,0 +1,224 @@
+"use client";
+
+import Link from "next/link";
+import { ScoreFigure, ScoreMeter } from "@/components/score-meter";
+import {
+  peekSession,
+  useSessions,
+} from "@/components/shell/session-provider";
+import { MissingRound, StorageError } from "@/components/storage-error";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DIMENSION_COPY,
+  difficultyLabel,
+  personaFor,
+  roleLabel,
+  topicById,
+} from "@/lib/catalog";
+import type { Session } from "@/lib/domain";
+import { buildReport } from "@/lib/engine/score";
+import { getQuestion } from "@/lib/questions";
+import { RoomSkeleton } from "@/features/interview/room-skeleton";
+
+export function ReportPage({ id }: { id: string }) {
+  const store = useSessions();
+  if (store.status === "loading") return <RoomSkeleton />;
+  if (store.status === "error") {
+    return <StorageError message={store.message} onReset={store.clear} />;
+  }
+  const session =
+    store.sessions.find((item) => item.id === id) ?? peekSession(id);
+  if (!session) {
+    return (
+      <MissingRound
+        title="This debrief is not on this device."
+        body="Debriefs stay in the browser that ran the round."
+      />
+    );
+  }
+  if (session.status !== "completed" || session.turns.length === 0) {
+    return (
+      <div className="max-w-xl">
+        <h1 className="text-4xl tracking-tight">This round is still open.</h1>
+        <p className="mt-3 text-muted-foreground">
+          Finish it, or close it, before there is a debrief.
+        </p>
+        <Button
+          className="mt-6 h-10"
+          nativeButton={false}
+          render={<Link href={`/interview/${session.id}`} />}
+        >
+          Return to the round
+        </Button>
+      </div>
+    );
+  }
+
+  const report = session.report ?? buildReport(session);
+  const persona = personaFor(session.config.track);
+  const topic = topicById(session.config.topic);
+
+  return (
+    <article className="mx-auto flex max-w-3xl flex-col gap-10">
+      <header>
+        <p className="text-xs font-medium tracking-[0.16em] text-copper uppercase">
+          Debrief · {persona.name}
+        </p>
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <h1 className="max-w-xl text-4xl leading-tight tracking-tight text-balance md:text-5xl">
+              {report.headline}
+            </h1>
+            <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
+              {report.summary}
+            </p>
+          </div>
+          <div className="text-right">
+            <ScoreFigure score={report.overall} />
+            <p className="mt-2 text-xs tracking-[0.14em] text-muted-foreground uppercase">
+              out of 100
+            </p>
+          </div>
+        </div>
+        <p className="mt-4 text-sm text-muted-foreground">
+          {topic.label} · {difficultyLabel(session.config.difficulty)} ·{" "}
+          {roleLabel(session.config.role)} · {session.turns.length}{" "}
+          {session.turns.length === 1 ? "answer" : "answers"}
+          {session.sample ? " · Sample" : ""}
+        </p>
+      </header>
+
+      <section className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10">
+        <h2 className="text-2xl tracking-tight">Five dimensions</h2>
+        <div className="mt-5 flex flex-col gap-4">
+          {DIMENSION_COPY.map((dimension) => (
+            <ScoreMeter
+              key={dimension.id}
+              label={dimension.label}
+              score={report.dimensions[dimension.id]}
+              detail={dimension.description}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-6 md:grid-cols-2">
+        <div>
+          <h2 className="text-2xl tracking-tight">What held</h2>
+          <ul className="mt-3 flex flex-col gap-2 text-sm leading-6">
+            {report.strengths.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h2 className="text-2xl tracking-tight">What to change</h2>
+          <ul className="mt-3 flex flex-col gap-2 text-sm leading-6">
+            {report.improvements.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="rounded-2xl bg-primary px-5 py-5 text-primary-foreground">
+        <h2 className="text-2xl tracking-tight">Next round</h2>
+        <p className="mt-2 max-w-xl text-sm leading-6 text-primary-foreground/80">
+          {report.nextPractice}
+        </p>
+        <Button
+          variant="secondary"
+          className="mt-4 h-10"
+          nativeButton={false}
+          render={
+            <Link
+              href={`/practice?track=${session.config.track}&topic=${session.config.topic}`}
+            />
+          }
+        >
+          Practice this gap
+        </Button>
+      </section>
+
+      <section className="flex flex-col">
+        <h2 className="text-2xl tracking-tight">Question by question</h2>
+        <div className="mt-4 divide-y divide-border">
+          {session.turns.map((turn, index) => (
+            <QuestionDebrief
+              key={`${turn.questionId}-${index}`}
+              index={index}
+              turn={turn}
+            />
+          ))}
+        </div>
+      </section>
+    </article>
+  );
+}
+
+function QuestionDebrief({
+  index,
+  turn,
+}: {
+  index: number;
+  turn: Session["turns"][number];
+}) {
+  const question = getQuestion(turn.questionId);
+  return (
+    <details className="group py-4">
+      <summary className="flex cursor-pointer list-none items-baseline justify-between gap-4 [&::-webkit-details-marker]:hidden">
+        <span className="text-left">
+          <span className="text-xs text-muted-foreground">Prompt {index + 1}</span>
+          <span className="mt-1 block font-medium leading-6">{turn.prompt}</span>
+        </span>
+        <span className="font-heading text-3xl tabular-nums">{turn.score.overall}</span>
+      </summary>
+      <div className="mt-4 flex flex-col gap-4 text-sm leading-6">
+        <div>
+          <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
+            What you said
+          </p>
+          <p className="mt-2 whitespace-pre-wrap">{turn.answer}</p>
+          {turn.followUpPrompt ? (
+            <>
+              <p className="mt-4 font-medium">{turn.followUpPrompt}</p>
+              <p className="mt-2 whitespace-pre-wrap">
+                {turn.followUpAnswer || "No follow-up answer."}
+              </p>
+            </>
+          ) : null}
+        </div>
+        <ul className="flex flex-col gap-1">
+          {turn.score.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+        {question ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-2">
+              {question.signals.map((signal) => {
+                const hit = turn.score.hitSignalIds.includes(signal.id);
+                return (
+                  <Badge key={signal.id} variant={hit ? "secondary" : "outline"}>
+                    {hit ? "Hit" : "Missed"} · {signal.label}
+                  </Badge>
+                );
+              })}
+            </div>
+            <div>
+              <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
+                A stronger shape
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5">
+                {question.outline.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
