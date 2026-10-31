@@ -99,6 +99,7 @@ function LiveRound({
   const question = getQuestion(session.questionIds[session.index]);
   const persona = personaFor(session.config.track);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [closingDraft, setClosingDraft] = useState("");
 
   const persistDraft = useCallback((draft: string, index: number, phase: SessionPhase) => {
     const current = sessionRef.current;
@@ -144,6 +145,10 @@ function LiveRound({
   }
 
   const hint = question.signals[0]?.hint;
+  const willDiscard =
+    session.turns.length === 0 &&
+    session.phase === "answering" &&
+    closingDraft.trim() === "";
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -232,7 +237,13 @@ function LiveRound({
       />
 
       <div className="flex items-center justify-between gap-3">
-        <Button variant="ghost" onClick={() => setConfirmEnd(true)}>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setClosingDraft(liveDraft.current);
+            setConfirmEnd(true);
+          }}
+        >
           Close the round
         </Button>
         <Link href="/practice" className="text-sm text-muted-foreground hover:text-foreground">
@@ -245,8 +256,8 @@ function LiveRound({
           <DialogHeader>
             <DialogTitle>Close this round?</DialogTitle>
             <DialogDescription>
-              {session.turns.length === 0 && session.phase === "answering"
-                ? "You have not sent an answer yet. Closing now discards the round."
+              {willDiscard
+                ? "Nothing has been sent, and the answer box is empty. Closing now discards the round."
                 : "What you have already sent is scored. An unsent draft is included if you have typed one."}
             </DialogDescription>
           </DialogHeader>
@@ -259,13 +270,13 @@ function LiveRound({
                 finish(
                   endEarly(
                     sessionRef.current,
-                    liveDraft.current,
+                    closingDraft,
                     new Date().toISOString(),
                   ),
                 );
               }}
             >
-              Score and close
+              {willDiscard ? "Discard round" : "Score and close"}
             </Button>
           </DialogFooter>
         </DialogContent>
