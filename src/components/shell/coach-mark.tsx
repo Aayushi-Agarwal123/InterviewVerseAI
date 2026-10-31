@@ -16,9 +16,16 @@ export function CoachMark({ compact = false }: { compact?: boolean }) {
   if (!coach.ready) return null;
   if (compact) {
     return (
-      <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">
-        {coach.label}
-      </p>
+      <div className="max-w-[11rem] text-right">
+        <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">
+          {coach.label}
+        </p>
+        {coach.provider === "gemini" ? (
+          <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+            Answers are sent to Google&apos;s API.
+          </p>
+        ) : null}
+      </div>
     );
   }
   return (

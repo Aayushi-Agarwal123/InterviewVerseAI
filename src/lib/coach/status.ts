@@ -1,7 +1,8 @@
 export type CoachModeSnapshot = {
   ready: boolean;
   mode: "ai" | "local";
-  reason: "ready" | "no-api-key" | "forced-local" | "unknown-provider";
+  provider: "gemini" | "openai" | null;
+  reason: "ready" | "no-api-key" | "forced-local" | "unknown-provider" | "missing-model";
   label: string;
   detail: string;
 };
@@ -9,16 +10,13 @@ export type CoachModeSnapshot = {
 const PENDING: CoachModeSnapshot = {
   ready: false,
   mode: "local",
+  provider: null,
   reason: "no-api-key",
   label: "Local Coach",
   detail: "",
 };
 
-const COPY: Record<CoachModeSnapshot["reason"] | "ai", Pick<CoachModeSnapshot, "label" | "detail">> = {
-  ai: {
-    label: "AI Coach",
-    detail: "Answers are sent to the model on the server. History stays in this browser.",
-  },
+const COPY: Record<CoachModeSnapshot["reason"], Pick<CoachModeSnapshot, "label" | "detail">> = {
   ready: {
     label: "AI Coach",
     detail: "Answers are sent to the model on the server. History stays in this browser.",
@@ -35,7 +33,26 @@ const COPY: Record<CoachModeSnapshot["reason"] | "ai", Pick<CoachModeSnapshot, "
     label: "Local Coach",
     detail: "The configured model provider is not available. Scoring uses the rubric.",
   },
+  "missing-model": {
+    label: "Local Coach",
+    detail: "Set INTERVIEWVERSE_COACH_MODEL to a Gemini model ID. Scoring uses the rubric on this device.",
+  },
 };
+
+export function coachCopy(
+  mode: CoachModeSnapshot["mode"],
+  reason: CoachModeSnapshot["reason"],
+  provider: CoachModeSnapshot["provider"],
+): Pick<CoachModeSnapshot, "label" | "detail"> {
+  if (mode === "ai" && provider === "gemini") {
+    return {
+      label: "Gemini AI Coach",
+      detail: "Answers are sent to Google's Gemini API. History stays in this browser.",
+    };
+  }
+  if (mode === "ai") return COPY.ready;
+  return COPY[reason];
+}
 
 let snapshot: CoachModeSnapshot = PENDING;
 const listeners = new Set<() => void>();
@@ -53,20 +70,30 @@ async function load() {
     const body = (await response.json()) as {
       mode?: unknown;
       reason?: unknown;
+      provider?: unknown;
     };
     const reason =
       body.reason === "ready" ||
       body.reason === "no-api-key" ||
       body.reason === "forced-local" ||
-      body.reason === "unknown-provider"
+      body.reason === "unknown-provider" ||
+      body.reason === "missing-model"
         ? body.reason
         : "no-api-key";
     const mode = body.mode === "ai" ? "ai" : "local";
-    const copy = mode === "ai" ? COPY.ai : COPY[reason];
-    emit({ ready: true, mode, reason, label: copy.label, detail: copy.detail });
+    const provider = body.provider === "gemini" || body.provider === "openai" ? body.provider : null;
+    const copy = coachCopy(mode, reason, provider);
+    emit({ ready: true, mode, provider, reason, label: copy.label, detail: copy.detail });
   } catch {
     const copy = COPY["no-api-key"];
-    emit({ ready: true, mode: "local", reason: "no-api-key", label: copy.label, detail: copy.detail });
+    emit({
+      ready: true,
+      mode: "local",
+      provider: null,
+      reason: "no-api-key",
+      label: copy.label,
+      detail: copy.detail,
+    });
   }
 }
 

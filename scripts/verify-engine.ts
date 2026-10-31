@@ -9,7 +9,10 @@ import {
 import { buildSampleSession } from "../src/lib/engine/sample";
 import { currentStreak } from "../src/lib/format";
 import { publicCoachStatus, readCoachConfig } from "../src/lib/coach/config";
+import { ModelCallError } from "../src/lib/coach/errors";
 import { evaluateAnswer, writeDebrief } from "../src/lib/coach/evaluate";
+import { completeGemini } from "../src/lib/coach/gemini";
+import { coachCopy } from "../src/lib/coach/status";
 import { evaluationMessages } from "../src/lib/coach/prompt";
 import { chooseFollowUp } from "../src/lib/coach/policy";
 import { parseEvaluateInput, readCoachVerdict } from "../src/lib/coach/schema";
@@ -494,6 +497,362 @@ assert(localRoundTrip, "local verdict stays readable");
 assert(localRoundTrip.score.overall === localResult.verdict.score.overall, "local overall is unchanged");
 assert(localRoundTrip.followUp === localResult.verdict.followUp, "local follow-up is unchanged");
 assert(!localRoundTrip.sampleAnswer, "local round trip has no sample");
+
+const geminiModel = "gemini-2.5-flash";
+const geminiConfig = readCoachConfig({
+  INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+  INTERVIEWVERSE_COACH_API_KEY: secret,
+  INTERVIEWVERSE_COACH_MODEL: geminiModel,
+});
+assert(geminiConfig.mode === "ai" && geminiConfig.provider === "gemini", "gemini key enables the model coach");
+assert(geminiConfig.model === geminiModel, "gemini model comes from the environment");
+assert(
+  geminiConfig.baseUrl === "https://generativelanguage.googleapis.com/v1beta",
+  "gemini uses the developer api by default",
+);
+assert(!JSON.stringify(publicCoachStatus(geminiConfig)).includes(secret), "gemini status leaked the key");
+assert(hidden.provider === "openai", "openai provider stays available");
+const geminiCopy = coachCopy("ai", "ready", "gemini");
+assert(geminiCopy.label === "Gemini AI Coach", "gemini label");
+assert(geminiCopy.detail.includes("Google"), "gemini privacy notice");
+assert(coachCopy("local", "no-api-key", null).label === "Local Coach", "local label");
+assert(coachCopy("ai", "ready", "openai").label === "AI Coach", "openai label stays");
+assert(coachCopy("local", "missing-model", null).detail.includes("MODEL"), "missing model copy");
+
+const geminiWithoutKey = readCoachConfig({ INTERVIEWVERSE_COACH_PROVIDER: "gemini" });
+assert(
+  geminiWithoutKey.mode === "local" && geminiWithoutKey.reason === "no-api-key" && geminiWithoutKey.apiKey === null,
+  "gemini without a key stays local",
+);
+const geminiMissingModel = readCoachConfig({
+  INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+  INTERVIEWVERSE_COACH_API_KEY: secret,
+});
+assert(
+  geminiMissingModel.mode === "local" &&
+    geminiMissingModel.reason === "missing-model" &&
+    geminiMissingModel.apiKey === null,
+  "gemini without a model stays local",
+);
+assert(
+  readCoachConfig({
+    INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+    INTERVIEWVERSE_COACH_API_KEY: secret,
+    INTERVIEWVERSE_COACH_MODEL: "../secret",
+  }).reason === "missing-model",
+  "gemini model id cannot change the request path",
+);
+
+const weakInput = {
+  questionId: twoSum.id,
+  phase: "answering" as const,
+  difficulty: "standard" as const,
+  role: "backend" as const,
+  focus: "",
+  hintUsed: false,
+  answer: "I would loop.",
+  asked: [] as string[],
+};
+
+async function withFetch<T>(
+  handler: (url: string, init: RequestInit) => Response,
+  run: () => Promise<T>,
+): Promise<{ result: T; calls: { url: string; init: RequestInit }[] }> {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const next = init ?? {};
+    calls.push({ url, init: next });
+    return handler(url, next);
+  }) as typeof fetch;
+  try {
+    return { result: await run(), calls };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+function geminiResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+let localCalls = 0;
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  localCalls += 1;
+  return geminiResponse(500, {});
+}) as typeof fetch;
+try {
+  const quiet = await evaluateAnswer(twoSum, weakInput, geminiWithoutKey);
+  assert(localCalls === 0 && quiet.verdict.source === "local", "local gemini config does not call fetch");
+  const unconfigured = await evaluateAnswer(twoSum, weakInput, geminiMissingModel);
+  assert(localCalls === 0 && unconfigured.verdict.source === "local", "missing model does not call fetch");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const technical = await withFetch(
+  () =>
+    geminiResponse(200, {
+      candidates: [{ content: { parts: [{ text: modelJson }] }, role: "model" }],
+    }),
+  () => evaluateAnswer(twoSum, weakInput, geminiConfig),
+);
+assert(technical.calls.length === 1, "gemini technical call is not retried");
+assert(technical.calls[0]?.url.endsWith(`/models/${geminiModel}:generateContent`), "gemini generateContent url");
+assert(!technical.calls[0]?.url.includes(secret) && !technical.calls[0]?.url.includes("key="), "key stays out of the url");
+assert(new Headers(technical.calls[0]?.init.headers).get("x-goog-api-key") === secret, "key is sent as a header");
+const technicalBody = JSON.parse(String(technical.calls[0]?.init.body)) as {
+  systemInstruction?: { parts?: { text?: string }[] };
+  contents?: { role?: string; parts?: { text?: string }[] }[];
+  generationConfig?: { responseMimeType?: string };
+};
+assert(technicalBody.generationConfig?.responseMimeType === "application/json", "gemini json mode");
+assert(technicalBody.contents?.[0]?.role === "user", "gemini user content");
+assert(technicalBody.systemInstruction?.parts?.[0]?.text?.includes("Arun Mehta"), "technical persona");
+assert(technicalBody.contents?.[0]?.parts?.[0]?.text?.includes("I would loop."), "answer is sent only in ai mode");
+assert(technical.result.mode === "ai" && technical.result.verdict.source === "ai", "mocked gemini verdict");
+assert(technical.result.verdict.sampleAnswer?.includes("hash map"), "gemini sample kept");
+assert(technical.result.verdict.followUp?.includes("same index"), "gemini follow-up kept");
+assert(technical.result.verdict.score.overall >= 0 && technical.result.verdict.score.overall <= 100, "gemini overall bounded");
+assert(
+  technical.result.verdict.score.hitSignalIds.length === weak.hitSignalIds.length,
+  "gemini signals stay on the rubric",
+);
+
+const hr = await withFetch(
+  () =>
+    geminiResponse(200, {
+      candidates: [{ content: { parts: [{ text: modelJson }] }, role: "model" }],
+    }),
+  () =>
+    evaluateAnswer(
+      hrQuestion,
+      {
+        questionId: hrQuestion.id,
+        phase: "answering",
+        difficulty: "warmup",
+        role: "fullstack",
+        focus: "",
+        hintUsed: false,
+        answer: "I shipped the migration after I cut the scope with the manager.",
+        asked: [],
+      },
+      geminiConfig,
+    ),
+);
+const hrBody = JSON.parse(String(hr.calls[0]?.init.body)) as {
+  systemInstruction?: { parts?: { text?: string }[] };
+};
+assert(hr.calls.length === 1, "gemini hr call is not retried");
+assert(hrBody.systemInstruction?.parts?.[0]?.text?.includes("Leela Kapoor"), "hr persona");
+assert(hr.result.verdict.followUp === undefined, "warmup still never follows up");
+const hrRound = submitAnswer(
+  createSession(
+    {
+      track: "hr",
+      topic: hrQuestion.topic,
+      difficulty: "warmup",
+      role: "fullstack",
+      questionCount: 1,
+      focus: "",
+    },
+    { random: () => 0, now: "2026-04-01T10:00:00.000Z", questionIds: [hrQuestion.id] },
+  ),
+  "I shipped the migration after I cut the scope with the manager.",
+  "2026-04-01T10:06:00.000Z",
+  hr.result.verdict,
+);
+assert(hrRound.turns[0]?.answer.includes("migration"), "hr answer is stored");
+assert(hrRound.turns[0]?.coach?.source === "ai", "hr debrief keeps the gemini sample");
+assert(hrRound.report, "hr round still completes");
+
+const quota = await withFetch(
+  () =>
+    geminiResponse(429, {
+      error: {
+        code: 429,
+        status: "RESOURCE_EXHAUSTED",
+        message: "You exceeded your current quota, please check your plan and billing details.",
+      },
+    }),
+  () => evaluateAnswer(twoSum, weakInput, geminiConfig),
+);
+assert(quota.calls.length === 1, "quota is not retried");
+assert(quota.result.fellBack && quota.result.verdict.source === "local", "quota falls back to the rubric");
+assert(quota.result.notice?.includes("quota") && quota.result.notice.includes("kept"), "quota notice");
+assert(!quota.result.notice?.toLowerCase().includes("billing"), "quota notice does not suggest billing");
+assert(!quota.result.verdict.sampleAnswer, "quota fallback has no sample answer");
+const kept = submitAnswer(
+  createSession(
+    {
+      track: "technical",
+      topic: "dsa",
+      difficulty: "standard",
+      role: "backend",
+      questionCount: 1,
+      focus: "",
+    },
+    { random: () => 0, now: "2026-04-01T10:00:00.000Z", questionIds: ["dsa-two-sum"] },
+  ),
+  weakInput.answer,
+  "2026-04-01T10:04:00.000Z",
+  quota.result.verdict,
+);
+const storedAnswer = kept.phase === "followup" ? kept.active.answer : kept.turns[0]?.answer;
+assert(storedAnswer === weakInput.answer, "quota fallback keeps the typed answer");
+
+const limited = await withFetch(
+  () => geminiResponse(429, { error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "Too many requests." } }),
+  () => evaluateAnswer(twoSum, weakInput, geminiConfig),
+);
+assert(limited.calls.length === 1 && limited.result.notice?.includes("rate-limited"), "rate limit notice");
+
+const invalid = await withFetch(
+  () =>
+    geminiResponse(400, {
+      error: { code: 400, status: "INVALID_ARGUMENT", message: `API key not valid. Please pass a valid API key. ${secret}` },
+    }),
+  async () => {
+    try {
+      await completeGemini({
+        apiKey: secret,
+        model: geminiModel,
+        baseUrl: geminiConfig.baseUrl,
+        temperature: 0.3,
+        messages: [{ role: "user", content: "I would loop." }],
+        signal: AbortSignal.timeout(1000),
+      });
+      return "resolved";
+    } catch (error) {
+      return error instanceof Error ? `${error.name} ${error.message}` : "unknown";
+    }
+  },
+);
+assert(invalid.calls.length === 1, "invalid key is not retried");
+assert(invalid.result.includes("ModelCallError"), "invalid key is a model error");
+assert(!invalid.result.includes(secret) && !invalid.result.includes("not valid"), "invalid key error hides the provider body");
+
+const invalidEval = await withFetch(
+  () =>
+    geminiResponse(400, {
+      error: { code: 400, status: "INVALID_ARGUMENT", message: "API key not valid. Please pass a valid API key." },
+    }),
+  () => evaluateAnswer(twoSum, weakInput, geminiConfig),
+);
+assert(invalidEval.calls.length === 1, "invalid evaluation is not retried");
+assert(invalidEval.result.verdict.source === "local", "invalid key uses the local coach");
+assert(invalidEval.result.notice?.includes("rejected") && invalidEval.result.notice.includes("kept"), "invalid key notice");
+
+const malformed = await withFetch(
+  () =>
+    geminiResponse(200, {
+      candidates: [{ content: { parts: [{ text: "not json at all" }] }, role: "model" }],
+    }),
+  () => evaluateAnswer(twoSum, weakInput, geminiConfig),
+);
+assert(malformed.calls.length === 1, "malformed text is not retried");
+assert(malformed.result.fellBack && malformed.result.notice?.includes("could not be read"), "malformed text notice");
+assert(malformed.result.verdict.source === "local", "malformed text uses the rubric");
+
+const emptyReply = await withFetch(
+  () => geminiResponse(200, { promptFeedback: { blockReason: "SAFETY" }, candidates: [] }),
+  async () => {
+    try {
+      await completeGemini({
+        apiKey: secret,
+        model: geminiModel,
+        baseUrl: geminiConfig.baseUrl,
+        temperature: 0.2,
+        messages: [{ role: "user", content: weakInput.answer }],
+        signal: AbortSignal.timeout(1000),
+      });
+      return null;
+    } catch (error) {
+      return error;
+    }
+  },
+);
+assert(emptyReply.calls.length === 1, "empty gemini reply is not retried");
+assert(
+  emptyReply.result instanceof ModelCallError && emptyReply.result.failure === "unavailable",
+  "empty gemini reply is unavailable",
+);
+assert(!String(emptyReply.result).includes(secret), "empty reply does not leak the key");
+
+const debrief = await withFetch(
+  () =>
+    geminiResponse(200, {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  narrative: "The loop is a start, and the pair lookup is still missing from the answer.",
+                  recommendations: ["Say the complement before the insert."],
+                }),
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  () =>
+    writeDebrief(
+      {
+        track: "technical",
+        topic: "dsa",
+        difficulty: "standard",
+        role: "backend",
+        focus: "",
+        turns: [
+          {
+            prompt: twoSum.prompt,
+            answer: weakInput.answer,
+            overall: 15,
+            strengths: [],
+            improvements: [],
+          },
+        ],
+      },
+      geminiConfig,
+    ),
+);
+assert(debrief.calls.length === 1, "gemini debrief is one request");
+assert(debrief.result.coach?.narrative.includes("pair lookup"), "gemini debrief narrative");
+const debriefQuota = await withFetch(
+  () =>
+    geminiResponse(429, {
+      error: { code: 429, status: "RESOURCE_EXHAUSTED", message: "Quota exceeded for this project." },
+    }),
+  () =>
+    writeDebrief(
+      {
+        track: "technical",
+        topic: "dsa",
+        difficulty: "standard",
+        role: "backend",
+        focus: "",
+        turns: [
+          {
+            prompt: twoSum.prompt,
+            answer: weakInput.answer,
+            overall: 15,
+            strengths: [],
+            improvements: [],
+          },
+        ],
+      },
+      geminiConfig,
+    ),
+);
+assert(debriefQuota.calls.length === 1 && !debriefQuota.result.coach, "debrief quota keeps the saved scores");
+assert(debriefQuota.result.notice?.includes("quota") && debriefQuota.result.notice.includes("saved"), "debrief quota notice");
 
 console.log(
   `engine ok: ${QUESTIONS.length} prompts, strong ${strong.overall}, weak ${weak.overall}, sample ${sample.report?.overall}`,

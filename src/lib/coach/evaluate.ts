@@ -2,6 +2,7 @@ import type { CoachVerdict, Question, ReportCoach } from "@/lib/domain";
 import { weightedOverall } from "@/lib/engine/score";
 import { clampScore } from "@/lib/text";
 import type { CoachRuntime } from "@/lib/coach/config";
+import { ModelCallError } from "@/lib/coach/errors";
 import { localVerdict } from "@/lib/coach/local";
 import { chooseFollowUp } from "@/lib/coach/policy";
 import { debriefMessages, evaluationMessages, type ChatMessage } from "@/lib/coach/prompt";
@@ -26,6 +27,28 @@ export const DEBRIEF_FALLBACK_NOTICE =
   "The model did not write a round summary. The scores and answers are saved.";
 
 const NUDGE_NOTE = "A nudge was used here, so depth is capped a little.";
+
+const GEMINI_NOTICES = {
+  answer: {
+    quota: "Gemini's free quota is exhausted. This answer was scored by the local coach, and your text was kept.",
+    "rate-limit": "Gemini rate-limited this request. This answer was scored by the local coach, and your text was kept.",
+    "invalid-key": "The Gemini API key was rejected. This answer was scored by the local coach, and your text was kept.",
+  },
+  debrief: {
+    quota: "Gemini's free quota is exhausted. The scores and answers are saved.",
+    "rate-limit": "Gemini rate-limited this request. The scores and answers are saved.",
+    "invalid-key": "The Gemini API key was rejected. The scores and answers are saved.",
+  },
+} as const;
+
+function noticeForModelError(error: unknown, kind: "answer" | "debrief"): string {
+  if (error instanceof ModelCallError && error.provider === "gemini") {
+    if (error.failure === "quota" || error.failure === "rate-limit" || error.failure === "invalid-key") {
+      return GEMINI_NOTICES[kind][error.failure];
+    }
+  }
+  return kind === "answer" ? LOCAL_FALLBACK_NOTICE : DEBRIEF_FALLBACK_NOTICE;
+}
 
 export type EvaluationResponse = {
   mode: "ai" | "local";
@@ -143,8 +166,8 @@ export async function evaluateAnswer(
       return { mode: "local", fellBack: true, notice: UNREADABLE_NOTICE, verdict: local };
     }
     return { mode: "ai", fellBack: false, verdict };
-  } catch {
-    return { mode: "local", fellBack: true, notice: LOCAL_FALLBACK_NOTICE, verdict: local };
+  } catch (error) {
+    return { mode: "local", fellBack: true, notice: noticeForModelError(error, "answer"), verdict: local };
   }
 }
 
@@ -173,7 +196,7 @@ export async function writeDebrief(
     const coach = materializeDebrief(parsed);
     if (!coach) return { mode: "local", fellBack: true, notice: DEBRIEF_FALLBACK_NOTICE };
     return { mode: "ai", fellBack: false, coach };
-  } catch {
-    return { mode: "local", fellBack: true, notice: DEBRIEF_FALLBACK_NOTICE };
+  } catch (error) {
+    return { mode: "local", fellBack: true, notice: noticeForModelError(error, "debrief") };
   }
 }

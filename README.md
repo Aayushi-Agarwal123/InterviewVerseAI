@@ -4,7 +4,7 @@ Practice a technical round or an HR conversation, then leave with a score you ca
 
 InterviewVerse AI is a single-user studio. You pick an interviewer, answer in writing, and get a debrief on five dimensions: relevance, structure, specificity, depth, and communication. History stays in this browser. There is no account.
 
-The coach can call an OpenAI-compatible model from a server route. With no API key, the same screens use the local rubric. The key never ships to the browser.
+The coach can call Google Gemini or an OpenAI-compatible model from a server route. With no API key, the same screens use the local rubric. The key never ships to the browser. Gemini mode sends answers to Google's API. Nothing in this app turns on paid billing.
 
 ## Run it
 
@@ -20,22 +20,22 @@ Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
 Copy `.env.example` to `.env.local` and set the key. Restart `npm run dev` after changing it.
 
 ```bash
-INTERVIEWVERSE_COACH_PROVIDER=openai
-INTERVIEWVERSE_COACH_API_KEY=sk-...
-INTERVIEWVERSE_COACH_MODEL=gpt-4o-mini
-INTERVIEWVERSE_COACH_BASE_URL=https://api.openai.com/v1
+INTERVIEWVERSE_COACH_PROVIDER=gemini
+INTERVIEWVERSE_COACH_API_KEY=
+INTERVIEWVERSE_COACH_MODEL=
+INTERVIEWVERSE_COACH_BASE_URL=
 ```
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `INTERVIEWVERSE_COACH_API_KEY` | For AI mode | Server-only secret. Leave empty for the local rubric. |
-| `INTERVIEWVERSE_COACH_PROVIDER` | No | `openai` when a key is set, or `local` to force the rubric. Add another id in `src/lib/coach/providers.ts`. |
-| `INTERVIEWVERSE_COACH_MODEL` | No | Defaults to `gpt-4o-mini`. |
-| `INTERVIEWVERSE_COACH_BASE_URL` | No | OpenAI-compatible host. Defaults to `https://api.openai.com/v1`. |
+| `INTERVIEWVERSE_COACH_PROVIDER` | No | `gemini`, `openai`, or `local`. An empty value with a key still selects OpenAI. |
+| `INTERVIEWVERSE_COACH_MODEL` | For Gemini | Gemini model ID from your project. OpenAI defaults to `gpt-4o-mini` when this is empty. |
+| `INTERVIEWVERSE_COACH_BASE_URL` | No | Empty uses the provider default: Gemini `https://generativelanguage.googleapis.com/v1beta`, OpenAI `https://api.openai.com/v1`. |
 
-`BASE_URL` is how you point the same provider at another OpenAI-compatible host. A different request shape needs a new entry in `MODEL_PROVIDERS`.
+Gemini uses the Developer API's `generateContent` request, not the OpenAI chat format. The key is sent as `x-goog-api-key` and is not put in the URL. A rate limit, quota error, rejected key, or unreadable reply is not retried. The answer is scored by the local rubric and kept. The sidebar says **Gemini AI Coach** or **Local Coach**, and says when answers are sent to Google.
 
-The sidebar says **AI Coach** or **Local Coach**. Local mode does not invent a sample answer or a model debrief. If a model call fails, the answer is scored on the rubric and kept.
+OpenAI remains available. Set `INTERVIEWVERSE_COACH_PROVIDER=openai` and a model such as `gpt-4o-mini`. Local mode does not invent a sample answer or a model debrief.
 
 ```bash
 npm run verify   # rubric and session checks
@@ -95,7 +95,7 @@ Topics: data structures, system design, frontend, backend, behavioral, leadershi
 ## Later phases
 
 1. **This slice.** Practice, rubric debrief, and local history.
-2. **Model coach.** Optional OpenAI-compatible key. Same five dimensions, with the rubric as the fallback.
+2. **Model coach.** Optional Gemini or OpenAI key. Same five dimensions, with the rubric as the fallback.
 3. **Accounts.** Move the session repository off the device so history follows the person.
 4. **Spoken rounds.** Voice in the same state machine, plus a second interviewer on one debrief.
 
