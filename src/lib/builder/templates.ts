@@ -301,9 +301,23 @@ export async function saveItem(name: string): Promise<Item> {
   memory.push(item);
   return item;
 }
+
+export async function updateItem(id: string, name: string): Promise<Item | null> {
+  const item = memory.find((entry) => entry.id === id);
+  if (!item) return null;
+  item.name = name;
+  return item;
+}
+
+export async function deleteItem(id: string): Promise<boolean> {
+  const index = memory.findIndex((entry) => entry.id === id);
+  if (index < 0) return false;
+  memory.splice(index, 1);
+  return true;
+}
 `;
 
-const MONGO_DB = `import { MongoClient, type ObjectId } from "mongodb";
+const MONGO_DB = `import { MongoClient, ObjectId } from "mongodb";
 
 export type Item = { id: string; name: string };
 
@@ -341,10 +355,37 @@ export async function saveItem(name: string): Promise<Item> {
   const inserted = await items.insertOne({ name });
   return { id: String(inserted.insertedId), name };
 }
+
+export async function updateItem(id: string, name: string): Promise<Item | null> {
+  const items = await collection();
+  if (!items) {
+    const item = memory.find((entry) => entry.id === id);
+    if (!item) return null;
+    item.name = name;
+    return item;
+  }
+  if (!ObjectId.isValid(id)) return null;
+  const result = await items.updateOne({ _id: new ObjectId(id) }, { $set: { name } });
+  if (result.matchedCount === 0) return null;
+  return { id, name };
+}
+
+export async function deleteItem(id: string): Promise<boolean> {
+  const items = await collection();
+  if (!items) {
+    const index = memory.findIndex((entry) => entry.id === id);
+    if (index < 0) return false;
+    memory.splice(index, 1);
+    return true;
+  }
+  if (!ObjectId.isValid(id)) return false;
+  const result = await items.deleteOne({ _id: new ObjectId(id) });
+  return result.deletedCount === 1;
+}
 `;
 
 const EXPRESS_INDEX = `import express from "express";
-import { databaseConfigured, getItems, saveItem } from "./db.ts";
+import { databaseConfigured, deleteItem, getItems, saveItem, updateItem } from "./db.ts";
 
 const app = express();
 app.use(express.json());
@@ -364,6 +405,31 @@ app.post("/api/items", async (request, response) => {
     return;
   }
   response.status(201).json({ item: await saveItem(name) });
+});
+
+app.put("/api/items/:id", async (request, response) => {
+  const name = typeof request.body?.name === "string" ? request.body.name.trim().slice(0, 80) : "";
+  const id = typeof request.params.id === "string" ? request.params.id : "";
+  if (!name) {
+    response.status(400).json({ error: "Name is required." });
+    return;
+  }
+  const item = await updateItem(id, name);
+  if (!item) {
+    response.status(404).json({ error: "Item was not found." });
+    return;
+  }
+  response.json({ item });
+});
+
+app.delete("/api/items/:id", async (request, response) => {
+  const id = typeof request.params.id === "string" ? request.params.id : "";
+  const removed = await deleteItem(id);
+  if (!removed) {
+    response.status(404).json({ error: "Item was not found." });
+    return;
+  }
+  response.status(204).end();
 });
 
 const port = Number(process.env.PORT ?? 4000);
@@ -427,7 +493,42 @@ export function App() {
       {error ? <p>{error}</p> : null}
       <ul>
         {items.map((item) => (
-          <li key={item.id}>{item.name}</li>
+          <li key={item.id}>
+            <span>{item.name}</span>
+            <button
+              type="button"
+              onClick={() => {
+                const next = item.name.endsWith(" updated") ? item.name : item.name + " updated";
+                void fetch(\`/api/items/\${item.id}\`, {
+                  method: "PUT",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ name: next }),
+                }).then((response) => {
+                  if (!response.ok) {
+                    setError("The item was not updated.");
+                    return;
+                  }
+                  void load();
+                });
+              }}
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void fetch(\`/api/items/\${item.id}\`, { method: "DELETE" }).then((response) => {
+                  if (!response.ok && response.status !== 204) {
+                    setError("The item was not deleted.");
+                    return;
+                  }
+                  void load();
+                });
+              }}
+            >
+              Delete
+            </button>
+          </li>
         ))}
       </ul>
     </main>
@@ -461,7 +562,13 @@ export function stackNotes(stack: StackId, database: BuildRequest["database"]): 
         "Authentication, a database, and an API.",
         "Any product feature named in the brief that is not listed above.",
       ],
-      setup: ["cd into the project", "npm install", "npm run dev", "Open the URL Vite prints."],
+      setup: [
+        "Download the ZIP and extract it.",
+        "cd into the extracted project",
+        "npm install",
+        "npm run dev",
+        "Open the URL Vite prints.",
+      ],
     };
   }
   if (stack === "next") {
@@ -473,7 +580,13 @@ export function stackNotes(stack: StackId, database: BuildRequest["database"]): 
         "Authentication, a database, and a separate API server.",
         "Any product feature named in the brief that is not listed above.",
       ],
-      setup: ["cd into the project", "npm install", "npm run dev", "Open http://localhost:3000"],
+      setup: [
+        "Download the ZIP and extract it.",
+        "cd into the extracted project",
+        "npm install",
+        "npm run dev",
+        "Open http://localhost:3000",
+      ],
     };
   }
   if (stack === "express") {
@@ -487,23 +600,24 @@ export function stackNotes(stack: StackId, database: BuildRequest["database"]): 
         {
           name: "Item API",
           purpose: mongo
-            ? "GET and POST /api/items. Uses MongoDB when MONGODB_URI is set, and memory otherwise."
-            : "GET and POST /api/items stored in memory for the life of the process.",
+            ? "Lists, creates, updates, and deletes items. Uses MongoDB when MONGODB_URI is set, and memory otherwise."
+            : "Lists, creates, updates, and deletes items in memory for the life of the process.",
         },
       ],
       included: [
         "An Express + TypeScript server.",
         "GET /health.",
         mongo
-          ? "GET and POST /api/items, with MongoDB when MONGODB_URI is set and an in-memory list otherwise."
-          : "GET and POST /api/items stored in memory.",
+          ? "GET, POST, PUT, and DELETE /api/items, with MongoDB when MONGODB_URI is set and an in-memory list otherwise."
+          : "GET, POST, PUT, and DELETE /api/items stored in memory.",
       ],
       notIncluded: [
         "A browser app, accounts, and passwords.",
         "Any product feature named in the brief that is not listed above.",
       ],
       setup: [
-        "cd into the project",
+        "Download the ZIP and extract it.",
+        "cd into the extracted project",
         "npm install",
         "Copy .env.example to .env and leave secrets empty unless you have a database.",
         "npm run dev",
@@ -514,23 +628,24 @@ export function stackNotes(stack: StackId, database: BuildRequest["database"]): 
   return {
     technologies: ["React", "Vite", "TypeScript", "Node.js", "Express", "MongoDB"],
     modules: [
-      { name: "Web client", purpose: "Lists items and posts a new name to the API." },
-      { name: "API server", purpose: "Serves /health and /api/items." },
+      { name: "Web client", purpose: "Lists items and calls the API to create, update, and delete them." },
+      { name: "API server", purpose: "Serves /health and the item routes." },
       {
         name: "Item store",
         purpose: "Uses MongoDB when MONGODB_URI is set, and memory otherwise.",
       },
     ],
     included: [
-      "A Vite + React client that loads and adds items.",
-      "An Express + TypeScript API with GET /health and GET and POST /api/items.",
-      "A MongoDB connection used only when MONGODB_URI is set. An empty value keeps items in memory.",
+      "A Vite + React client that loads items and calls create, update, and delete.",
+      "An Express + TypeScript API with GET /health and GET, POST, PUT, and DELETE /api/items.",
+      "MongoDB operations used only when MONGODB_URI is set. An empty value keeps items in memory.",
     ],
     notIncluded: [
       "Accounts, passwords, and an admin role.",
       "Any product feature named in the brief that is not listed above.",
     ],
     setup: [
+      "Download the ZIP and extract it.",
       "cd server, npm install, copy .env.example to .env, then npm run dev",
       "In another terminal, cd client, npm install, then npm run dev",
       "Open the URL Vite prints. The client proxies /api to port 4000.",

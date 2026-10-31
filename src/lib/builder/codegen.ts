@@ -6,6 +6,7 @@ import { completeGemini } from "@/lib/coach/gemini";
 import type { ChatMessage } from "@/lib/coach/prompt";
 import type { ProjectAnalysis } from "@/lib/builder/manifest";
 import { dependencyNames } from "@/lib/builder/manifest";
+import { validateProject, validationReportLines } from "@/lib/builder/validate";
 import { LIMITS, redactSecrets, safeRelativePath, withinFileLimits } from "@/lib/builder/paths";
 import { rootGitignore, stackFiles, stackNotes } from "@/lib/builder/templates";
 import { STACK_LABELS, type BuildRequest, type FileOrigin, type ProjectFile, type ProjectManifest } from "@/lib/builder/types";
@@ -35,63 +36,6 @@ const CONFIG_NAMES = new Set([
   ".gitignore",
   ".env.example",
 ]);
-const STOP_WORDS = new Set([
-  "about",
-  "after",
-  "again",
-  "application",
-  "based",
-  "build",
-  "could",
-  "create",
-  "feature",
-  "features",
-  "from",
-  "have",
-  "include",
-  "into",
-  "just",
-  "local",
-  "more",
-  "most",
-  "must",
-  "need",
-  "needs",
-  "online",
-  "only",
-  "other",
-  "over",
-  "platform",
-  "project",
-  "should",
-  "simple",
-  "small",
-  "some",
-  "such",
-  "system",
-  "that",
-  "their",
-  "them",
-  "then",
-  "there",
-  "they",
-  "this",
-  "under",
-  "user",
-  "users",
-  "using",
-  "very",
-  "want",
-  "what",
-  "when",
-  "where",
-  "which",
-  "will",
-  "with",
-  "would",
-  "your",
-]);
-
 type Draft = {
   contents: string;
   origin: FileOrigin;
@@ -293,18 +237,6 @@ function stripComments(contents: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-function hasWord(hay: string, word: string): boolean {
-  return new RegExp(`\\b${word}\\b`, "i").test(hay);
-}
-
-function requirementFound(requirement: string, code: string): boolean {
-  const words = requirement.toLowerCase().match(/[a-z][a-z0-9]{4,}/g) ?? [];
-  const significant = [...new Set(words.filter((word) => !STOP_WORDS.has(word)))];
-  if (significant.length === 0) return false;
-  const hits = significant.filter((word) => hasWord(code, word));
-  return hits.length >= (significant.length === 1 ? 1 : 2);
-}
-
 export function scanProject(
   files: { path: string; contents: string }[],
   request: BuildRequest,
@@ -336,12 +268,25 @@ export function scanProject(
   if (authAsked && !authPresent) notIncluded.push("Authentication was requested and is not in the source.");
 
   for (const requirement of analysis.functionalRequirements) {
-    if (requirementFound(requirement, code)) included.push(`The source mentions this brief line: ${requirement}`);
-    else notIncluded.push(`Not in the source: ${requirement}`);
+    notIncluded.push(`Not verified from source: ${requirement}`);
   }
   if (included.length === 0) included.push("No route, client, or brief line was found in the source files.");
   if (notIncluded.length === 0) notIncluded.push("No missing brief line was detected in the source files.");
   return { included, notIncluded };
+}
+
+function batchExpectations(batch: CodeBatch, request: BuildRequest): string {
+  if (batch === "backend") {
+    return "Register GET /health, GET /api/items, POST /api/items, PUT /api/items/:id, and DELETE /api/items/:id. Each item route must call an imported store function.";
+  }
+  if (batch === "database") {
+    return "Export getItems, saveItem, updateItem, and deleteItem. Each function must call find, insertOne, updateOne, or deleteOne on a MongoDB collection when MONGODB_URI is set, and may use memory when it is empty.";
+  }
+  if (batch === "frontend" && request.stack === "fullstack") {
+    return "Call GET, POST, PUT, and DELETE /api/items with fetch. Use the same paths the API registers.";
+  }
+  if (batch === "configuration") return "Keep dev and start scripts. Do not add install lifecycle scripts or secret values.";
+  return "Do not list a feature as implemented.";
 }
 
 function batchRules(batch: CodeBatch, request: BuildRequest): string {
@@ -384,7 +329,7 @@ function batchMessages(batch: CodeBatch, request: BuildRequest, analysis: Projec
         "Every path is relative. Never use an absolute path, a .. segment, node_modules, a secret file, or an API key.",
         "Do not ask the server to run a command. The server will not execute anything you return.",
         "Omit a file to leave the existing template copy in place.",
-        "Do not claim a feature exists unless the file contents contain it.",
+        "Write the operation in code. A comment that names a feature is not an implementation.",
         `This batch is ${batch}.`,
       ].join(" "),
     },
@@ -398,6 +343,7 @@ function batchMessages(batch: CodeBatch, request: BuildRequest, analysis: Projec
         `Requirements: ${analysis.functionalRequirements.join("; ")}`,
         `Template paths you may replace: ${templatePaths(batch, request).join(", ") || "none"}`,
         batchRules(batch, request),
+        batchExpectations(batch, request),
       ].join("\n\n"),
     },
   ];
@@ -417,6 +363,7 @@ function composeReadme(
   files: ProjectFile[],
   included: string[],
   notIncluded: string[],
+  validation: ReturnType<typeof validateProject>,
 ): string {
   const notes = stackNotes(request.stack, request.database);
   const generated = files.filter((file) => file.origin === "gemini").map((file) => file.path);
@@ -460,11 +407,14 @@ function composeReadme(
     "",
     ...analysis.functionalRequirements.map((item) => `- ${item}`),
     "",
-    "## Run it",
+    "## Run it locally",
+    "",
+    "Download the ZIP and extract it before installing. This server did not install dependencies or run the project.",
     "",
     ...notes.setup.map((item, index) => `${index + 1}. ${item}`),
     "",
-    "No API keys are included. This server did not install dependencies or run the generated project.",
+    ...validationReportLines(validation),
+    "No API keys are included.",
     "",
   ].join("\n");
 }
@@ -543,12 +493,25 @@ export async function applyCodeGeneration(
     contents: draft.contents,
     origin: draft.origin,
   }));
-  const scanned = scanProject(draftFiles, request, analysis);
-  const readme = composeReadme(request, analysis, draftFiles, scanned.included, scanned.notIncluded);
+  const notes = stackNotes(request.stack, request.database);
+  const validation = validateProject({
+    stack: request.stack,
+    technologies: notes.technologies,
+    objective: analysis.objective,
+    functionalRequirements: analysis.functionalRequirements,
+    files: draftFiles,
+  });
+  const readme = composeReadme(
+    request,
+    analysis,
+    draftFiles,
+    validation.implemented,
+    validation.missing,
+    validation,
+  );
   if (readme.length > LIMITS.fileChars) return null;
   const projectFiles = toProjectFiles(request, files, readme);
   if (!withinFileLimits(projectFiles)) return null;
-  const notes = stackNotes(request.stack, request.database);
   return {
     notice: skipped > 0 ? "Gemini wrote some source files. Any batch it did not return stayed on the local template." : undefined,
     manifest: {
@@ -561,11 +524,12 @@ export async function applyCodeGeneration(
       functionalRequirements: analysis.functionalRequirements,
       nonFunctionalRequirements: analysis.nonFunctionalRequirements,
       modules: analysis.modules,
-      included: scanned.included,
-      notIncluded: scanned.notIncluded,
+      included: validation.implemented,
+      notIncluded: validation.missing,
       dependencies: dependencyNames(projectFiles),
       setup: notes.setup,
       files: projectFiles,
+      validation,
     },
   };
 }

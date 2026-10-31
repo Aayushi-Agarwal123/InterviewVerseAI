@@ -22,6 +22,14 @@ export type ProjectModule = {
   purpose: string;
 };
 
+export type ProjectValidation = {
+  geminiFiles: string[];
+  templateFiles: string[];
+  implemented: string[];
+  missing: string[];
+  errors: string[];
+};
+
 export type FileOrigin = "gemini" | "template";
 
 export type ProjectFile = {
@@ -45,6 +53,7 @@ export type ProjectManifest = {
   dependencies: string[];
   setup: string[];
   files: ProjectFile[];
+  validation?: ProjectValidation;
 };
 
 export type BuilderMode = "gemini" | "local";

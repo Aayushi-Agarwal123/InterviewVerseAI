@@ -10,6 +10,7 @@ import { buildSampleSession } from "../src/lib/engine/sample";
 import { currentStreak } from "../src/lib/format";
 import { unzipSync, strFromU8 } from "fflate";
 import { batchesFor, filterBatchFiles, parseBatchPayload, pathAllowed, scanProject } from "../src/lib/builder/codegen";
+import { validateProject } from "../src/lib/builder/validate";
 import { generateProject } from "../src/lib/builder/generate";
 import { sealManifest } from "../src/lib/builder/manifest";
 import { LIMITS, safeRelativePath } from "../src/lib/builder/paths";
@@ -915,6 +916,8 @@ try {
     assert(!built.manifest.files.some((entry) => entry.path.split("/").includes("node_modules")), "no installed modules");
     assert(built.manifest.dependencies.includes(stack.dependency), `dependency ${stack.dependency}`);
     assert(!built.manifest.dependencies.includes(stack.forbidden), `does not depend on ${stack.forbidden}`);
+    assert((built.manifest.validation?.errors.length ?? 1) === 0, `local validation ${parsed.value.stack}`);
+    assert(sealManifest(built.manifest)?.validation?.errors.length === built.manifest.validation?.errors.length, "seal recomputes validation");
     assert(sealManifest(built.manifest)?.files.length === built.manifest.files.length, "manifest seals");
     const readme = built.manifest.files.find((entry) => entry.path === "README.md")?.contents ?? "";
     assert(readme.includes("What this starter does not include"), "honest limits");
@@ -953,6 +956,9 @@ if (full.ok) {
     assert(names.every((entry) => entry.startsWith(`${built.manifest.slug}/`)), "zip keeps the project folder");
     const health = names.find((entry) => entry.endsWith("server/src/index.ts"));
     assert(health && strFromU8(opened[health]).includes("/health"), "zip contains the health route");
+    assert(health && strFromU8(opened[health]).includes("deleteItem"), "zip contains the delete route");
+    const clientApp = names.find((entry) => entry.endsWith("client/src/App.tsx"));
+    assert(clientApp && strFromU8(opened[clientApp]).includes('method: "PUT"') && strFromU8(opened[clientApp]).includes('method: "DELETE"'), "zip client calls update and delete");
     const readmeName = `${built.manifest.slug}/README.md`;
     assert(strFromU8(opened[readmeName]).includes("Interview Prep"), "zip readme names the project");
     assert(!names.some((entry) => entry.includes("node_modules")), "zip skips node_modules");
@@ -1342,8 +1348,22 @@ if (fullGemini.ok) {
   const fullJoined = fullProject.result.manifest.files.map((entry) => entry.contents).join("\n");
   assert(fullJoined.includes("gemini-client-screen"), "frontend source is generated");
   assert(fullJoined.includes("gemini-mongo-store"), "database source is generated");
-  assert(fullProject.result.manifest.included.some((item) => item.includes("MongoDB")), "mongo is claimed from source");
-  assert(fullProject.result.manifest.included.some((item) => item.includes("React")), "react is claimed from source");
+  assert(
+    fullProject.result.manifest.validation?.errors.some((item) => item.includes("export is missing")),
+    "replaced database file must still export the store",
+  );
+  assert(
+    fullProject.result.manifest.validation?.missing.some((item) => item.includes("MongoDB")),
+    "an unused MongoClient is not database integration",
+  );
+  assert(
+    fullProject.result.manifest.validation?.missing.some((item) => item.includes("client does not call")),
+    "a client that does not call the API is incomplete",
+  );
+  assert(
+    !fullProject.result.manifest.included.some((item) => /mongodb is wired|database works/i.test(item)),
+    "mongo is not claimed from the constructor alone",
+  );
   const fullZip = zipProject(fullProject.result.manifest.slug, fullProject.result.manifest.files, secret);
   assert(fullZip, "fullstack zip");
   if (fullZip) {
@@ -1364,6 +1384,69 @@ const nextGemini = parseBuildRequest({
   backend: "none",
   database: "none",
 });
+const expressLocal = parseBuildRequest({
+  name: "Interview Prep",
+  description: builderBrief,
+  extras: "",
+  frontend: "none",
+  backend: "express",
+  database: "none",
+});
+assert(expressLocal.ok, "express validation request");
+if (expressLocal.ok) {
+  const built = await generateProject(expressLocal.value, readCoachConfig({}));
+  const report = built.manifest.validation;
+  assert(report && report.errors.length === 0, "express template has no validation errors");
+  assert(report?.geminiFiles.length === 0, "local express has no gemini files");
+  assert(report?.implemented.some((item) => item.includes("PUT /api/items/:id")), "update route calls the store");
+  assert(report?.implemented.some((item) => item.includes("DELETE /api/items/:id")), "delete route calls the store");
+  assert(report?.missing.some((item) => item.includes("Not verified from source")), "brief lines stay unverified");
+  assert(built.manifest.setup[0]?.includes("Download the ZIP"), "setup starts with download");
+}
+
+const commentOnly = validateProject({
+  stack: "express",
+  technologies: ["Node.js", "Express", "TypeScript"],
+  objective: "Store interview items.",
+  functionalRequirements: ["Delete an item."],
+  files: [
+    {
+      path: "package.json",
+      origin: "template",
+      contents: `${JSON.stringify({ name: "items", scripts: { dev: "tsx src/index.ts", start: "tsx src/index.ts" }, dependencies: { express: "^4.21.2" } }, null, 2)}\n`,
+    },
+    {
+      path: "src/index.ts",
+      origin: "gemini",
+      contents: 'import express from "express";\nconst app = express();\n// delete update create crud\napp.get("/health", (_request, response) => { response.json({ ok: true }); });\napp.delete("/api/items/:id", (_request, response) => { response.json({ deleted: true }); });\n',
+    },
+    { path: "src/missing-call.ts", origin: "template", contents: "export function deleteItem(){ return true }\n" },
+  ],
+});
+assert(commentOnly.geminiFiles.includes("src/index.ts"), "validation records the gemini file");
+assert(!commentOnly.implemented.some((item) => item.includes("DELETE")), "a delete route that calls no store is not implemented");
+assert(commentOnly.missing.some((item) => item.includes("does not call an imported store function")), "missing store call is reported");
+assert(commentOnly.missing.some((item) => item.includes("Delete an item.")), "named requirement stays missing");
+
+const brokenImport = validateProject({
+  stack: "express",
+  technologies: ["Node.js", "Express", "TypeScript"],
+  objective: "Store interview items.",
+  functionalRequirements: [],
+  files: [
+    {
+      path: "package.json",
+      contents: `${JSON.stringify({ scripts: { dev: "tsx src/index.ts" }, dependencies: {} }, null, 2)}\n`,
+    },
+    {
+      path: "src/index.ts",
+      contents: 'import express from "express";\nimport { getItems } from "./missing.ts";\nconst app = express();\napp.get("/api/items", async (_request, response) => { response.json(await getItems()); });\n',
+    },
+  ],
+});
+assert(brokenImport.errors.some((item) => item.includes("missing.ts")), "missing file is a validation error");
+assert(brokenImport.errors.some((item) => item.includes("does not depend on it")), "undeclared import is a validation error");
+
 assert(nextGemini.ok, "next codegen request");
 if (nextGemini.ok) {
   assert(!batchesFor(nextGemini.value).includes("backend"), "next does not request a backend batch");

@@ -1,4 +1,5 @@
 import { withinFileLimits } from "@/lib/builder/paths";
+import { validateProject, validationReportLines } from "@/lib/builder/validate";
 import { rootGitignore, stackFiles, stackNotes } from "@/lib/builder/templates";
 import {
   STACKS,
@@ -6,6 +7,7 @@ import {
   type ProjectFile,
   type ProjectManifest,
   type ProjectModule,
+  type ProjectValidation,
   type StackId,
 } from "@/lib/builder/types";
 
@@ -38,7 +40,12 @@ export function localAnalysis(request: BuildRequest): ProjectAnalysis {
   };
 }
 
-function readmeFile(request: BuildRequest, analysis: ProjectAnalysis, source: ProjectManifest["source"]): ProjectFile {
+function readmeFile(
+  request: BuildRequest,
+  analysis: ProjectAnalysis,
+  source: ProjectManifest["source"],
+  validation: ProjectValidation,
+): ProjectFile {
   const notes = stackNotes(request.stack, request.database);
   const contents = [
     `# ${request.name}`,
@@ -73,10 +80,13 @@ function readmeFile(request: BuildRequest, analysis: ProjectAnalysis, source: Pr
     "",
     ...analysis.modules.map((item) => `- ${item.name}: ${item.purpose}`),
     "",
-    "## Run it",
+    "## Run it locally",
+    "",
+    "Download the ZIP and extract it before installing. This server did not install dependencies or run the project.",
     "",
     ...notes.setup.map((item, index) => `${index + 1}. ${item}`),
     "",
+    ...validationReportLines(validation),
     "No API keys are included. Copy `.env.example` to `.env` only when that example file is in this archive.",
     "",
   ].join("\n");
@@ -103,7 +113,15 @@ export function assembleManifest(
   source: ProjectManifest["source"],
 ): ProjectManifest {
   const notes = stackNotes(request.stack, request.database);
-  const files = [readmeFile(request, analysis, source), rootGitignore(), ...stackFiles(request)];
+  const sourceFiles = [rootGitignore(), ...stackFiles(request)].map((file) => ({ ...file, origin: "template" as const }));
+  const validation = validateProject({
+    stack: request.stack,
+    technologies: notes.technologies,
+    objective: analysis.objective,
+    functionalRequirements: analysis.functionalRequirements,
+    files: sourceFiles,
+  });
+  const files = [readmeFile(request, analysis, source, validation), ...sourceFiles];
   return {
     source,
     name: request.name,
@@ -119,6 +137,7 @@ export function assembleManifest(
     dependencies: dependencyNames(files),
     setup: notes.setup,
     files,
+    validation,
   };
 }
 
@@ -147,5 +166,14 @@ export function sealManifest(value: unknown): ProjectManifest | null {
   }
   if (!withinFileLimits(files)) return null;
   const manifest = value as ProjectManifest;
-  return { ...manifest, files };
+  const validation = validateProject({
+    stack: manifest.stack,
+    technologies: Array.isArray(manifest.technologies) ? manifest.technologies.filter((item) => typeof item === "string") : [],
+    objective: manifest.objective,
+    functionalRequirements: Array.isArray(manifest.functionalRequirements)
+      ? manifest.functionalRequirements.filter((item): item is string => typeof item === "string")
+      : [],
+    files,
+  });
+  return { ...manifest, files, validation };
 }
