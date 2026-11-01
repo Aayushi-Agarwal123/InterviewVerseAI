@@ -1,6 +1,6 @@
 # InterviewVerse AI
 
-Practice a technical round or an HR conversation, then leave with a score you can compare to the last one.
+Practice a technical round, an HR conversation, a profile-based interview, or a spoken round, then leave with a score you can compare to the last one.
 
 InterviewVerse AI is a single-user studio. You pick an interviewer, answer in writing, and get a debrief on five dimensions: relevance, structure, specificity, depth, and communication. History stays in this browser. There is no account.
 
@@ -90,21 +90,20 @@ A nudge reveals one signal and caps depth slightly. The outline on the debrief i
 
 In AI mode the model writes the follow-up from the answer you gave. Warm-up still never follows up. A follow-up that repeats the prompt is discarded, and the bank probe is used when the model does not offer a usable one. Hit and missed signals stay on the rubric, so the badges remain comparable. The overall score still uses the same weights: relevance 0.18, structure 0.20, specificity 0.18, depth 0.28, communication 0.16. A failed model call does not drop the text you typed.
 
-## Modules in this slice
+## Modules
 
-- **Studio** — open round, averages, streak, recent debriefs.
-- **Practice** — technical (Arun Mehta) or HR (Leela Kapoor), topic, pressure, length, optional focus.
-- **Round** — prompt, timebox, answer, follow-up, early close.
-- **Debrief** — headline, dimensions, per-question notes, missed signals.
-- **Progress** — score trend and history. Clear deletes only this browser.
+- **Studio** — open round, averages, streak, and the paths into the rest of the studio.
+- **Question interview** — technical (Arun Mehta) or HR (Leela Kapoor), topic, pressure, length, timer, follow-up, debrief.
+- **Personalized interview** — profile fields, Gemini questions when configured, otherwise the question bank chosen for those skills. Difficulty can swap the next prompt after a thin or strong answer.
+- **Voice** — browser speech synthesis and speech recognition, with a typed answer when either is missing or permission is denied.
+- **Roadmap** — daily, weekly, and skill tasks from saved scores. Checks stay in this browser.
+- **Mentor** — one next action from the saved profile and rounds. Gemini when configured, otherwise a local reply.
+- **Coding arena** — original problems, visible sample cases, JavaScript in a browser worker. Other languages are saved and not run. The server does not execute solutions.
+- **Job match** — paste a description and type skills. No resume upload.
+- **Memory** — view or clear rounds, profile, roadmap checks, and learning notes separately.
+- **Progress** — mixed overall, plus model-coach and Local Coach counts kept apart.
+- **Project builder** — four starter stacks, Gemini source when configured, local template fallback, validation, and ZIP download.
 
 Topics: data structures, system design, frontend, backend, behavioral, leadership, conflict, career story.
 
-## Later phases
-
-1. **This slice.** Practice, rubric debrief, and local history.
-2. **Model coach.** Optional Gemini or OpenAI key. Same five dimensions, with the rubric as the fallback.
-3. **Accounts.** Move the session repository off the device so history follows the person.
-4. **Spoken rounds.** Voice in the same state machine, plus a second interviewer on one debrief.
-
-Do not add those until this loop feels honest. A higher score should mean the signals were in the answer.
+Learning data uses `interviewverse.career.v1`. Interview rounds stay in `interviewverse.v1`. Neither store holds an API key.

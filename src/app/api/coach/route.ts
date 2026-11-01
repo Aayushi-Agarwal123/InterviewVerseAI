@@ -7,6 +7,7 @@ import {
   readCoachVerdict,
   readReportCoach,
 } from "@/lib/coach/schema";
+import { sealCustomQuestion } from "@/lib/career/custom";
 import { getQuestion } from "@/lib/questions";
 
 const MAX_BODY_BYTES = 320_000;
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
 
   const action = (body as { action?: unknown }).action;
   if (action === "evaluate") return evaluate(body, config);
+  if (action === "evaluate-custom") return evaluateCustom(body, config);
   if (action === "debrief") return debrief(body, config);
   return respond({ error: "Unknown coach action." }, 400, config.apiKey);
 }
@@ -86,6 +88,21 @@ async function evaluate(body: unknown, config: CoachRuntime): Promise<Response> 
   if (!parsed.ok) return respond({ error: parsed.error }, 400, config.apiKey);
   const question = getQuestion(parsed.value.questionId);
   if (!question) return respond({ error: "That prompt is not in the bank." }, 400, config.apiKey);
+  const result = await evaluateAnswer(question, parsed.value, config);
+  const verdict = readCoachVerdict(result.verdict);
+  if (!verdict) return respond({ error: "The coach response was withheld." }, 500, config.apiKey);
+  return respond({ ...result, verdict }, 200, config.apiKey);
+}
+
+async function evaluateCustom(body: unknown, config: CoachRuntime): Promise<Response> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return respond({ error: "Send a JSON object." }, 400, config.apiKey);
+  }
+  const record = body as Record<string, unknown>;
+  const question = sealCustomQuestion(record.question, 0);
+  if (!question) return respond({ error: "That custom prompt could not be scored." }, 400, config.apiKey);
+  const parsed = parseEvaluateInput({ ...record, questionId: question.id });
+  if (!parsed.ok) return respond({ error: parsed.error }, 400, config.apiKey);
   const result = await evaluateAnswer(question, parsed.value, config);
   const verdict = readCoachVerdict(result.verdict);
   if (!verdict) return respond({ error: "The coach response was withheld." }, 500, config.apiKey);

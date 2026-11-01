@@ -27,11 +27,13 @@ import {
 } from "@/lib/catalog";
 import type { CoachVerdict, Session, SessionPhase } from "@/lib/domain";
 import {
+  requestCustomEvaluation,
   requestDebrief,
   requestEvaluation,
   shouldScoreLocally,
   UNREACHABLE_NOTICE,
 } from "@/lib/coach/browser";
+import { VoiceBar } from "@/features/interview/voice-bar";
 import { useCoachMode } from "@/components/shell/coach-mark";
 import {
   endEarly,
@@ -40,6 +42,7 @@ import {
   withDraft,
 } from "@/lib/engine/session";
 import { formatClock } from "@/lib/format";
+import { questionOn } from "@/lib/engine/session";
 import { getQuestion } from "@/lib/questions";
 import { wordCount } from "@/lib/text";
 import { RoomSkeleton } from "@/features/interview/room-skeleton";
@@ -103,9 +106,13 @@ function LiveRound({
   useEffect(() => {
     liveDraft.current = sessionRef.current.draft;
   }, [session.id, session.index, session.phase]);
-  const question = getQuestion(session.questionIds[session.index]);
+  const question = questionOn(session, session.questionIds[session.index]);
   const persona = personaFor(session.config.track);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [transcript, setTranscript] = useState<{ text: string; nonce: number } | null>(null);
+  useEffect(() => {
+    setTranscript(null);
+  }, [session.index, session.phase]);
   const [closingDraft, setClosingDraft] = useState("");
   const [scoringLabel, setScoringLabel] = useState("");
   const scoringRef = useRef(false);
@@ -166,9 +173,11 @@ function LiveRound({
     try {
       if (askModel) {
         try {
-          const result = await requestEvaluation({
-            questionId: current.questionIds[current.index] ?? "",
-            phase: current.phase === "followup" ? "followup" : "answering",
+          const questionId = current.questionIds[current.index] ?? "";
+          const custom = current.prompts?.[questionId];
+          const payload = {
+            questionId,
+            phase: current.phase === "followup" ? ("followup" as const) : ("answering" as const),
             difficulty: current.config.difficulty,
             role: current.config.role,
             focus: current.config.focus,
@@ -179,7 +188,10 @@ function LiveRound({
             asked: current.turns.flatMap((turn) =>
               [turn.prompt, turn.followUpPrompt].filter((item): item is string => Boolean(item)),
             ),
-          });
+          };
+          const result = custom && !getQuestion(questionId)
+            ? await requestCustomEvaluation({ ...payload, question: custom })
+            : await requestEvaluation(payload);
           verdict = result.verdict;
           notice = result.notice;
         } catch (error) {
@@ -246,8 +258,18 @@ function LiveRound({
         <p className="text-xs font-medium tracking-[0.16em] text-copper uppercase">
           {topicById(session.config.topic).label} · {difficultyLabel(session.config.difficulty)} ·{" "}
           {roleLabel(session.config.role)}
+          {session.kind === "personalized" ? " · Personalized" : ""}
+          {session.voice ? " · Voice" : ""}
           {coach.ready ? ` · ${coach.label}` : ""}
         </p>
+        {session.planSource ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {session.planSource === "gemini"
+              ? "These questions were written by Gemini for the saved profile. Standby prompts from the bank can replace the next question when an answer is thin or strong."
+              : "These questions were chosen from the bank for the saved profile. Gemini did not write them."}
+          </p>
+        ) : null}
+        {session.durationMinutes ? <RoundClock startedAt={session.createdAt} minutes={session.durationMinutes} /> : null}
         <div className="mt-3">
           <Progress
             value={((session.index + 1) / session.questionIds.length) * 100}
@@ -290,6 +312,10 @@ function LiveRound({
             <li key={turn.questionId} className="rounded-xl bg-card/70 px-4 py-3 text-sm ring-1 ring-foreground/5">
               <span className="text-muted-foreground">Answer {index + 1}</span>
               <span className="ml-2 font-medium tabular-nums">{turn.score.overall}</span>
+              <span className="ml-2 text-muted-foreground">
+                {turn.coach?.source === "ai" ? "Model coach" : "Local Coach"} · communication{" "}
+                {turn.score.dimensions.communication}
+              </span>
             </li>
           ))}
         </ol>
@@ -312,6 +338,9 @@ function LiveRound({
             difficulty={session.config.difficulty}
           />
         </div>
+        {session.promptNotes?.[question.id] ? (
+          <p className="mt-5 text-sm leading-6 text-muted-foreground">{session.promptNotes[question.id]}</p>
+        ) : null}
         <p className="mt-5 text-xs text-muted-foreground">{question.setup}</p>
         <h1 className="mt-3 text-3xl leading-snug tracking-tight text-balance">
           {question.prompt}
@@ -328,8 +357,21 @@ function LiveRound({
         ) : null}
       </article>
 
+      {session.voice ? (
+        <VoiceBar
+          prompt={session.phase === "followup" ? session.active.followUpPrompt ?? question.prompt : question.prompt}
+          onTranscript={(text) => {
+            const next = liveDraft.current ? `${liveDraft.current.trim()} ${text}` : text;
+            liveDraft.current = next;
+            persistDraft(next, session.index, session.phase);
+            setTranscript({ text: next, nonce: Date.now() });
+          }}
+        />
+      ) : null}
+
       <Composer
         key={`${session.index}-${session.phase}`}
+        inject={transcript}
         initial={session.draft}
         phase={session.phase}
         index={session.index}
@@ -457,6 +499,23 @@ function applyNotice(session: Session, notice?: string): Session {
   return { ...session, coachNotice: text };
 }
 
+function RoundClock({ startedAt, minutes }: { startedAt: string; minutes: number }) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const elapsed = now === null ? 0 : Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+  const remaining = minutes * 60 - elapsed;
+  return (
+    <p className="mt-2 text-sm text-muted-foreground tabular-nums">
+      Round budget {minutes} min · {remaining >= 0 ? `${formatClock(remaining)} left` : "over the planned duration"}
+    </p>
+  );
+}
+
 function Composer({
   initial,
   phase,
@@ -464,6 +523,7 @@ function Composer({
   hint,
   hintUsed,
   busy,
+  inject,
   onHint,
   onValue,
   onDraft,
@@ -475,6 +535,7 @@ function Composer({
   hint?: string;
   hintUsed: boolean;
   busy: boolean;
+  inject?: { text: string; nonce: number } | null;
   onHint: () => void;
   onValue: (draft: string) => void;
   onDraft: (draft: string, index: number, phase: SessionPhase) => void;
@@ -483,6 +544,13 @@ function Composer({
   const [draft, setDraft] = useState(initial);
   const [error, setError] = useState("");
   const words = wordCount(draft);
+  useEffect(() => {
+    if (!inject) return;
+    setDraft(inject.text);
+    onValue(inject.text);
+    // The transcript nonce is the only signal that new speech arrived.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inject?.nonce]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => onDraft(draft, index, phase), 450);

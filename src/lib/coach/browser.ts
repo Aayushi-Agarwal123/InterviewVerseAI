@@ -24,6 +24,25 @@ export function shouldScoreLocally(): boolean {
   return knownLocalMode();
 }
 
+export async function requestCustomEvaluation(
+  input: EvaluateInput & { question: unknown },
+): Promise<EvaluationResult> {
+  const response = await fetch("/api/coach", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "evaluate-custom", ...input }),
+  });
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = isRecord(body) ? readNotice(body.error) : undefined;
+    throw new Error(error ?? UNREACHABLE_NOTICE);
+  }
+  const verdict = isRecord(body) ? readCoachVerdict(body.verdict) : null;
+  if (!verdict) throw new Error(UNREACHABLE_NOTICE);
+  const notice = isRecord(body) && body.fellBack === true ? readNotice(body.notice) : undefined;
+  return { verdict, notice };
+}
+
 export async function requestEvaluation(input: EvaluateInput): Promise<EvaluationResult> {
   const response = await fetch("/api/coach", {
     method: "POST",

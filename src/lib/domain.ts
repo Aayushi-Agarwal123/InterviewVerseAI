@@ -117,6 +117,8 @@ export type Report = {
   coach?: ReportCoach;
 };
 
+export type SessionKind = "bank" | "personalized" | "voice";
+
 export type Session = {
   id: string;
   createdAt: string;
@@ -133,6 +135,14 @@ export type Session = {
   sample?: boolean;
   report?: Report;
   coachNotice?: string;
+  kind?: SessionKind;
+  voice?: boolean;
+  prompts?: Record<string, Question>;
+  standbyIds?: string[];
+  promptNotes?: Record<string, string>;
+  durationMinutes?: number;
+  planSource?: "gemini" | "bank";
+  profileName?: string;
 };
 
 export const DIMENSIONS: Dimension[] = [

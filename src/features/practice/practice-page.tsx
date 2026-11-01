@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PageIntro } from "@/components/page-intro";
 import { useSessions } from "@/components/shell/session-provider";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/catalog";
 import type { Difficulty, RoleTarget, Topic, Track } from "@/lib/domain";
 import { questionsFor } from "@/lib/engine/session";
+import { voiceSupport } from "@/lib/voice/support";
 import { cn } from "@/lib/utils";
 
 function lengthOptions(count: number): { count: number; label: string }[] {
@@ -37,7 +38,7 @@ function topicFor(track: Track, requested: string | null): Topic {
   return match?.id ?? TOPICS.find((topic) => topic.track === track)!.id;
 }
 
-export function PracticePage() {
+export function PracticePage({ voiceMode = false }: { voiceMode?: boolean }) {
   const params = useSearchParams();
   const router = useRouter();
   const store = useSessions();
@@ -48,6 +49,8 @@ export function PracticePage() {
   const [role, setRole] = useState<RoleTarget>("fullstack");
   const [questionCount, setQuestionCount] = useState(3);
   const [focus, setFocus] = useState("");
+  const [voice, setVoice] = useState(voiceMode);
+  const [voiceNote, setVoiceNote] = useState("Voice is checked in this browser after the page loads.");
 
   const pool = useMemo(
     () => questionsFor({ track, topic, difficulty }),
@@ -66,6 +69,17 @@ export function PracticePage() {
         );
   const persona = personaFor(track);
 
+  useEffect(() => {
+    const host = window as Window & { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+    setVoiceNote(
+      voiceSupport({
+        speechSynthesis: window.speechSynthesis,
+        SpeechRecognition: host.SpeechRecognition,
+        webkitSpeechRecognition: host.webkitSpeechRecognition,
+      }).label,
+    );
+  }, []);
+
   function chooseTrack(next: Track) {
     setTrack(next);
     setTopic(topicFor(next, null));
@@ -82,9 +96,13 @@ export function PracticePage() {
     <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div>
         <PageIntro
-          kicker="Practice"
-          title="Set the round, then sit in it."
-          lede="Pick the interviewer, the topic, and how hard they push. You can leave early and still get a debrief on the answers you gave."
+          kicker={voiceMode ? "Voice interview" : "Question interview"}
+          title={voiceMode ? "Speak the round, or type if the browser cannot." : "Set the round, then sit in it."}
+          lede={
+            voiceMode
+              ? `${voiceNote} The same question bank, timer, follow-ups, and debrief still apply.`
+              : "Pick the interviewer, the topic, and how hard they push. You can leave early and still get a debrief on the answers you gave."
+          }
         />
 
         <fieldset className="mt-8">
@@ -242,18 +260,34 @@ export function PracticePage() {
             <dd className="tabular-nums">{minutes} min</dd>
           </div>
         </dl>
+        <label className="mt-5 flex items-start gap-3 text-sm leading-5">
+          <input
+            type="checkbox"
+            className="mt-1 size-4 accent-[var(--primary)]"
+            checked={voice || voiceMode}
+            disabled={voiceMode}
+            onChange={(event) => setVoice(event.target.checked)}
+          />
+          <span>
+            Voice interview
+            <span className="mt-1 block text-xs text-muted-foreground">{voiceNote}</span>
+          </span>
+        </label>
         <Button
           className="mt-6 h-10 w-full"
           disabled={count === 0}
           onClick={() => {
-            const session = store.create({
-              track,
-              topic,
-              difficulty,
-              role,
-              questionCount: count,
-              focus,
-            });
+            const session = store.create(
+              {
+                track,
+                topic,
+                difficulty,
+                role,
+                questionCount: count,
+                focus,
+              },
+              voice || voiceMode ? { voice: true, kind: "voice" } : undefined,
+            );
             if (session) router.push(`/interview/${session.id}`);
           }}
         >

@@ -78,9 +78,12 @@ function commit(next: Session[]): boolean {
   return true;
 }
 
-export function createRound(config: SessionConfig): Session | null {
+export function createRound(
+  config: SessionConfig,
+  options?: Omit<NonNullable<Parameters<typeof createSession>[1]>, "now">,
+): Session | null {
   if (snapshot.status !== "ready") return null;
-  const session = createSession(config, { now: new Date().toISOString() });
+  const session = createSession(config, { ...options, now: new Date().toISOString() });
   memory.set(session.id, session);
   return commit([session, ...snapshot.sessions]) ? session : null;
 }

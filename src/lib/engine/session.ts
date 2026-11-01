@@ -36,6 +36,11 @@ function createId(): string {
   return `iv_${Date.now().toString(36)}`;
 }
 
+export function questionOn(session: Session, id: string | undefined): Question | undefined {
+  if (!id) return undefined;
+  return session.prompts?.[id] ?? getQuestion(id);
+}
+
 export function createSession(
   config: SessionConfig,
   options?: {
@@ -44,15 +49,25 @@ export function createSession(
     questionIds?: string[];
     sample?: boolean;
     random?: () => number;
+    prompts?: Record<string, Question>;
+    standbyIds?: string[];
+    promptNotes?: Record<string, string>;
+    kind?: Session["kind"];
+    voice?: boolean;
+    durationMinutes?: number;
+    planSource?: Session["planSource"];
+    profileName?: string;
   },
 ): Session {
   const now = options?.now ?? new Date().toISOString();
   const pool = questionsFor(config);
+  const allowed = (id: string) => Boolean(getQuestion(id) || options?.prompts?.[id]);
   const picked =
-    options?.questionIds?.filter((id) => getQuestion(id)) ??
+    options?.questionIds?.filter(allowed) ??
     shuffle(pool, options?.random ?? Math.random)
       .slice(0, Math.max(1, Math.min(config.questionCount, pool.length)))
       .map((question) => question.id);
+  const standbyIds = options?.standbyIds?.filter(allowed);
 
   return {
     id: options?.id ?? createId(),
@@ -72,6 +87,14 @@ export function createSession(
     turns: [],
     status: "active",
     sample: options?.sample,
+    kind: options?.kind,
+    voice: options?.voice,
+    prompts: options?.prompts,
+    standbyIds,
+    promptNotes: options?.promptNotes,
+    durationMinutes: options?.durationMinutes,
+    planSource: options?.planSource,
+    profileName: options?.profileName,
   };
 }
 
@@ -126,7 +149,7 @@ function advance(session: Session, turn: Turn, now: string): Session {
   if (nextIndex >= session.questionIds.length) {
     return complete(session, turns, now);
   }
-  return {
+  return adaptNext({
     ...session,
     turns,
     index: nextIndex,
@@ -135,7 +158,26 @@ function advance(session: Session, turn: Turn, now: string): Session {
     active: freshActive(),
     updatedAt: now,
     questionStartedAt: now,
-  };
+  });
+}
+
+function adaptNext(session: Session): Session {
+  if (session.kind !== "personalized") return session;
+  const last = session.turns.at(-1);
+  if (!last) return session;
+  const want: Session["config"]["difficulty"] =
+    last.score.overall < 45 ? "warmup" : last.score.overall > 82 ? "pressure" : session.config.difficulty;
+  const current = questionOn(session, session.questionIds[session.index]);
+  if (!current || current.difficulties.includes(want)) return session;
+  const standby = session.standbyIds ?? [];
+  const swapAt = standby.findIndex((id) => questionOn(session, id)?.difficulties.includes(want));
+  if (swapAt < 0) return session;
+  const questionIds = [...session.questionIds];
+  const displaced = questionIds[session.index];
+  questionIds[session.index] = standby[swapAt];
+  const standbyIds = [...standby];
+  standbyIds[swapAt] = displaced;
+  return { ...session, questionIds, standbyIds };
 }
 
 export function submitAnswer(
@@ -147,7 +189,7 @@ export function submitAnswer(
   if (session.status !== "active") return session;
   const text = draft.trim();
   if (!text) return session;
-  const question = getQuestion(session.questionIds[session.index]);
+  const question = questionOn(session, session.questionIds[session.index]);
   if (!question) return session;
 
   if (session.phase === "followup") {
@@ -226,7 +268,7 @@ export function endEarly(
   verdict?: CoachVerdict,
 ): Session | null {
   if (session.status !== "active") return session;
-  const question = getQuestion(session.questionIds[session.index]);
+  const question = questionOn(session, session.questionIds[session.index]);
   let turns = session.turns;
   const pending = draft.trim();
   const closing = verdict ? { ...verdict, followUp: undefined } : undefined;

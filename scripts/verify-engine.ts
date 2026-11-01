@@ -1,3 +1,14 @@
+import { performanceSnapshot } from "../src/lib/career/analytics";
+import { sealCustomQuestion } from "../src/lib/career/custom";
+import { matchJob } from "../src/lib/career/match";
+import { CAREER_KEY, parseCareer } from "../src/lib/career/memory";
+import { localMentorReply, mentorBrief } from "../src/lib/career/mentor";
+import { planFromBank, planInterview, sessionFromPlan } from "../src/lib/career/plan";
+import { parseProfile, questionBudget } from "../src/lib/career/profile";
+import { buildRoadmap } from "../src/lib/career/roadmap";
+import { outcomesMatch } from "../src/lib/coding/run";
+import { voiceSupport } from "../src/lib/voice/support";
+import { STORAGE_KEY } from "../src/lib/storage";
 import { QUESTIONS, getQuestion } from "../src/lib/questions";
 import { pickFollowUp, scoreAnswer, weightedOverall } from "../src/lib/engine/score";
 import {
@@ -1770,6 +1781,160 @@ if (nextGemini.ok) {
   assert(pathAllowed("frontend", "src/app/page.tsx", nextGemini.value), "next page path");
   assert(!pathAllowed("backend", "server/src/index.ts", nextGemini.value), "next rejects an express path");
 }
+
+const asha = parseProfile({
+  name: "Asha",
+  qualification: "B.Tech",
+  college: "",
+  skills: ["React", "CSS"],
+  experience: "fresher",
+  years: 0,
+  role: "Frontend engineer",
+  company: "",
+  interviewType: "technical",
+  difficulty: "standard",
+  durationMinutes: 15,
+});
+assert(asha.ok, "profile parses");
+assert(!parseProfile({ name: "A" }).ok, "short profile name is rejected");
+if (asha.ok) {
+  assert(questionBudget(asha.value.durationMinutes) === 3, "15 minutes asks three questions");
+  const bankPlan = planFromBank(asha.value);
+  assert(bankPlan.source === "bank" && bankPlan.questionIds.length === 3, "bank plan uses three questions");
+  assert(
+    bankPlan.questionIds.some((id) => getQuestion(id)?.topic === "frontend"),
+    "react skills prefer a frontend prompt",
+  );
+  const plannedSession = sessionFromPlan(bankPlan, { now: "2026-04-01T10:00:00.000Z" });
+  assert(plannedSession.kind === "personalized" && plannedSession.planSource === "bank", "personalized session stays labeled");
+  const answered = submitAnswer(
+    plannedSession,
+    "I would keep the component state local and measure the render cost before adding a cache.",
+    "2026-04-01T10:04:00.000Z",
+  );
+  assert(answered.turns.length === 1 || answered.phase === "followup", "personalized answer is kept");
+  let planCalls = 0;
+  const skipped = await planInterview(
+    asha.value,
+    readCoachConfig({
+      INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+      INTERVIEWVERSE_COACH_API_KEY: "YOUR_GEMINI_API_KEY",
+      INTERVIEWVERSE_COACH_MODEL: "YOUR_MODEL_ID",
+    }),
+    async () => {
+      planCalls += 1;
+      return new Response("no");
+    },
+  );
+  assert(planCalls === 0 && skipped.source === "bank", "placeholder gemini is not called for a personalized round");
+  const brief = mentorBrief(asha.value, []);
+  const mentorText = localMentorReply("explain a hash map for this role", brief);
+  assert(mentorText.includes("Hash map") && mentorText.includes("Frontend engineer"), "local mentor uses the saved role");
+  const roadmap = buildRoadmap([], asha.value, []);
+  assert(roadmap.some((task) => task.horizon === "today"), "roadmap includes a daily task");
+  const done = buildRoadmap([], asha.value, [roadmap[0]?.id ?? ""]);
+  assert(done[0]?.done, "a manual roadmap check is kept");
+}
+
+const sealed = sealCustomQuestion(
+  {
+    id: "gx-1",
+    track: "technical",
+    topic: "backend",
+    difficulty: "standard",
+    prompt: "How would you design a rate limiter for a public API used by interview tools?",
+    setup: "Talk about the first limit you would enforce.",
+  },
+  0,
+);
+assert(sealed?.id === "gx-1" && sealed.signals.every((signal) => !signal.patterns.some((pattern) => pattern.includes("("))), "custom prompt uses fixed signals");
+assert(
+  sealCustomQuestion({ prompt: "too short", setup: "no", track: "technical", topic: "backend" }, 0) === null,
+  "a short custom prompt is rejected",
+);
+
+const gap = matchJob("We need React, Node.js, and system design experience.", ["React"]);
+assert(gap.matching.includes("React") && gap.missing.includes("Node.js") && gap.gapPercent > 0, "job match finds the gap");
+assert(gap.note.includes("not a resume"), "job match is not a resume review");
+assert(matchJob("hello", []).required.length === 0, "an empty description recognizes no skills");
+
+assert(outcomesMatch([0, 1], [0, 1]), "coding outputs match");
+assert(!outcomesMatch([1, 0], [0, 1]), "coding output order matters");
+assert(parseCareer("{") === null, "broken career data is ignored");
+assert(STORAGE_KEY === "interviewverse.v1" && CAREER_KEY.startsWith("interviewverse.career"), "career data does not replace interview rounds");
+
+const speech = voiceSupport({ speechSynthesis: {}, SpeechRecognition: undefined, webkitSpeechRecognition: undefined });
+assert(speech.speechSynthesis && !speech.speechRecognition && speech.label.includes("Type the answer"), "missing recognition is labeled");
+assert(voiceSupport(null).label.includes("browser"), "voice is not claimed before the browser is checked");
+
+const sourceSplit = performanceSnapshot([
+  {
+    ...createSession(
+      { track: "technical", topic: "dsa", difficulty: "standard", role: "backend", questionCount: 1, focus: "" },
+      { now: "2026-04-02T10:00:00.000Z", questionIds: ["dsa-two-sum"] },
+    ),
+    status: "completed",
+    report: {
+      overall: 70,
+      dimensions: { relevance: 70, structure: 70, specificity: 70, depth: 70, communication: 70 },
+      headline: "Held",
+      summary: "Held the prompt.",
+      strengths: [],
+      improvements: [],
+      nextPractice: "Another dsa round.",
+    },
+    turns: [
+      {
+        questionId: "dsa-two-sum",
+        prompt: "Pair",
+        answer: "Hash map.",
+        hintUsed: false,
+        score: {
+          dimensions: { relevance: 80, structure: 70, specificity: 70, depth: 70, communication: 60 },
+          overall: 80,
+          hitSignalIds: [],
+          missedSignalIds: [],
+          notes: [],
+        },
+        coach: { source: "ai", strengths: [], improvements: [], tips: [], sampleAnswer: "Use a hash map." },
+      },
+    ],
+  },
+  {
+    ...createSession(
+      { track: "hr", topic: "behavioral", difficulty: "standard", role: "fullstack", questionCount: 1, focus: "" },
+      { now: "2026-04-03T10:00:00.000Z", questionIds: ["behavioral-deadline"] },
+    ),
+    status: "completed",
+    report: {
+      overall: 40,
+      dimensions: { relevance: 40, structure: 40, specificity: 40, depth: 40, communication: 40 },
+      headline: "Thin",
+      summary: "The result was missing.",
+      strengths: [],
+      improvements: [],
+      nextPractice: "Add a number.",
+    },
+    turns: [
+      {
+        questionId: "behavioral-ownership",
+        prompt: "Tell me",
+        answer: "We did it.",
+        hintUsed: false,
+        score: {
+          dimensions: { relevance: 40, structure: 40, specificity: 40, depth: 40, communication: 40 },
+          overall: 40,
+          hitSignalIds: [],
+          missedSignalIds: [],
+          notes: ["Add a result."],
+        },
+      },
+    ],
+  },
+]);
+assert(sourceSplit.model.count === 1 && sourceSplit.local.count === 1, "model and local answers stay separate");
+assert(sourceSplit.technical.count === 1 && sourceSplit.hr.count === 1, "technical and hr rounds stay separate");
+assert(sourceSplit.model.average === 80 && sourceSplit.local.average === 40, "source averages are not blended");
 
 console.log(
   `engine ok: ${QUESTIONS.length} prompts, strong ${strong.overall}, weak ${weak.overall}, sample ${sample.report?.overall}`,

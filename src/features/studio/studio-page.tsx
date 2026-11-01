@@ -57,6 +57,17 @@ export function StudioPage() {
         </Button>
       </div>
 
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Studio modes">
+        <ModeCard href="/practice" kicker="Question bank" title="Technical or HR" body="One prompt at a time, with the existing timer, follow-up rule, and debrief." />
+        <ModeCard href="/personalized" kicker="Profile" title="Personalized" body="Gemini writes the round when configured. Otherwise the bank is matched to your skills." />
+        <ModeCard href="/voice" kicker="Browser speech" title="Voice" body="Speak the question and transcribe the microphone when the browser allows it." />
+        <ModeCard href="/roadmap" kicker="From your scores" title="Roadmap" body="Daily and weekly goals from the weak topics already saved here." />
+        <ModeCard href="/arena" kicker="In the browser" title="Coding arena" body="Sample cases for original problems. JavaScript runs locally. The server does not." />
+        <ModeCard href="/jobs" kicker="No resume" title="Job match" body="Paste a description, type your skills, and see the gap." />
+        <ModeCard href="/mentor" kicker="Saved history" title="Mentor" body="One next action from the profile and the rounds on this device." />
+        <ModeCard href="/builder" kicker="Separate download" title="Project builder" body="The four starter stacks, Gemini source when configured, and a ZIP." />
+      </section>
+
       {active ? <ActiveBanner session={active} /> : null}
 
       {completed.length === 0 ? (
@@ -105,6 +116,16 @@ export function StudioPage() {
         </>
       )}
     </div>
+  );
+}
+
+function ModeCard({ href, kicker, title, body }: { href: string; kicker: string; title: string; body: string }) {
+  return (
+    <Link href={href} className="rounded-2xl bg-card px-4 py-4 ring-1 ring-foreground/10 transition-colors hover:bg-card/80">
+      <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">{kicker}</p>
+      <h2 className="mt-2 text-xl tracking-tight">{title}</h2>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
+    </Link>
   );
 }
 

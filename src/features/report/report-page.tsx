@@ -77,6 +77,12 @@ export function ReportPage({ id }: { id: string }) {
             <p className="mt-4 max-w-xl text-base leading-7 text-muted-foreground">
               {report.summary}
             </p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {session.turns.filter((turn) => turn.coach?.source === "ai").length} answers scored by a model coach.{" "}
+              {session.turns.filter((turn) => turn.coach?.source !== "ai").length} scored by the Local Coach.
+              {session.planSource === "gemini" ? " Gemini wrote the questions." : ""}
+              {session.planSource === "bank" ? " Questions were chosen from the bank." : ""}
+            </p>
           </div>
           <div className="text-right">
             <ScoreFigure score={report.overall} />
@@ -183,6 +189,7 @@ export function ReportPage({ id }: { id: string }) {
               key={`${turn.questionId}-${index}`}
               index={index}
               turn={turn}
+              prompts={session.prompts}
             />
           ))}
         </div>
@@ -260,11 +267,13 @@ function FeedbackList({ label, items }: { label: string; items: string[] }) {
 function QuestionDebrief({
   index,
   turn,
+  prompts,
 }: {
   index: number;
   turn: Session["turns"][number];
+  prompts?: Session["prompts"];
 }) {
-  const question = getQuestion(turn.questionId);
+  const question = prompts?.[turn.questionId] ?? getQuestion(turn.questionId);
   return (
     <details className="group py-4">
       <summary className="flex cursor-pointer list-none items-baseline justify-between gap-4 [&::-webkit-details-marker]:hidden">
@@ -272,7 +281,12 @@ function QuestionDebrief({
           <span className="text-xs text-muted-foreground">Prompt {index + 1}</span>
           <span className="mt-1 block font-medium leading-6">{turn.prompt}</span>
         </span>
-        <span className="font-heading text-3xl tabular-nums">{turn.score.overall}</span>
+        <span className="text-right">
+          <span className="block font-heading text-3xl tabular-nums">{turn.score.overall}</span>
+          <span className="text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
+            {turn.coach?.source === "ai" ? "Model coach" : "Local Coach"}
+          </span>
+        </span>
       </summary>
       <div className="mt-4 flex flex-col gap-4 text-sm leading-6">
         <div>

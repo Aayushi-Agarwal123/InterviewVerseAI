@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     template: "%s · InterviewVerse AI",
   },
   description:
-    "Practice technical and HR interviews, get a rubric debrief, and track how the rounds change.",
+    "Practice question, personalized, and voice interviews, then track scores, a roadmap, and coding work in this browser.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
