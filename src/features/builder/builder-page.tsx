@@ -37,11 +37,11 @@ function Choice({
       onClick={onClick}
       className={cn(
         "rounded-xl px-3 py-3 text-left ring-1",
-        pressed ? "bg-card ring-primary" : "bg-card/40 ring-foreground/10 hover:ring-foreground/20",
+        pressed ? "bg-primary text-primary-foreground ring-primary shadow-card" : "bg-card ring-foreground/10 hover:bg-secondary/50",
       )}
     >
       <span className="block text-sm font-medium">{label}</span>
-      {detail ? <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{detail}</span> : null}
+      {detail ? <span className="mt-0.5 block text-xs leading-5 opacity-80">{detail}</span> : null}
     </button>
   );
 }
@@ -159,7 +159,7 @@ export function BuilderPage() {
           lede="Describe the product and pick a stack. Gemini writes source files when it is configured. Otherwise the download is a local template, and the preview says which one you received."
         />
 
-        <div className="mt-6 rounded-2xl bg-card px-4 py-4 ring-1 ring-foreground/10">
+        <div className="panel mt-6 px-4 py-4">
           <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">
             {builder.ready ? builder.label : "Checking the builder"}
           </p>
@@ -268,14 +268,14 @@ export function BuilderPage() {
 
       <aside className="min-w-0 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-auto lg:pt-2">
         {!manifest ? (
-          <div className="rounded-2xl bg-card/60 px-4 py-5 ring-1 ring-foreground/10">
+          <div className="panel bg-card/70 px-5 py-5">
             <h2 className="font-heading text-xl tracking-tight">Nothing generated yet</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Generate a project to see the architecture, the file tree, the file contents, and the download.
             </p>
           </div>
         ) : (
-          <div className="rounded-2xl bg-card px-4 py-5 ring-1 ring-foreground/10">
+          <div className="panel px-5 py-5">
             <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">
               {manifest.source === "gemini" ? "Gemini AI-generated project" : "Local Template-generated project"}
             </p>

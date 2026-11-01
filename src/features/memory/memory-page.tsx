@@ -29,14 +29,14 @@ export function MemoryPage() {
   const tasks = buildRoadmap(store.sessions, career.data.profile, career.data.manualTasks, now);
   const profile = career.data.profile;
   return (
-    <div className="flex max-w-3xl flex-col gap-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <PageIntro
         kicker="Interview memory"
         title="Only what this browser saved."
         lede="Scores, topics, roadmap checks, coding submissions, and mentor notes stay in local storage. Nothing here is a hidden profile on a server."
       />
-      <section className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10">
-        <h2 className="text-2xl tracking-tight">Profile</h2>
+      <section className="panel px-5 py-5">
+        <h2 className="font-heading text-2xl tracking-tight">Profile</h2>
         {profile ? (
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
             <Item label="Name" value={profile.name} />
@@ -50,8 +50,8 @@ export function MemoryPage() {
           <p className="mt-3 text-sm text-muted-foreground">No profile yet. The personalized interview saves one when you start a round.</p>
         )}
       </section>
-      <section className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10">
-        <h2 className="text-2xl tracking-tight">What the rounds show</h2>
+      <section className="panel px-5 py-5">
+        <h2 className="font-heading text-2xl tracking-tight">What the rounds show</h2>
         <p className="mt-3 text-sm leading-6">
           {snapshot.rounds} completed rounds. Overall {snapshot.overall ?? "—"}. Strongest recent movement is listed on Progress.
           Weak topics: {snapshot.topics.slice().sort((a, b) => a.average - b.average).slice(0, 3).map((item) => `${item.label} ${item.average}`).join(", ") || "none yet"}.

@@ -64,7 +64,7 @@ export function ReportPage({ id }: { id: string }) {
   const hasAi = session.turns.some((turn) => turn.coach?.source === "ai");
 
   return (
-    <article className="mx-auto flex max-w-3xl flex-col gap-10">
+    <article className="mx-auto flex max-w-3xl flex-col gap-8">
       <header>
         <p className="text-xs font-medium tracking-[0.16em] text-copper uppercase">
           Debrief · {persona.name}

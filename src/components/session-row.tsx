@@ -22,7 +22,7 @@ export function SessionRow({ session }: { session: Session }) {
   return (
     <Link
       href={href}
-      className="flex items-center justify-between gap-4 rounded-xl px-3 py-3 transition-colors hover:bg-card"
+      className="flex items-center justify-between gap-4 rounded-2xl px-3 py-3 transition-colors hover:bg-secondary/60"
     >
       <span className="min-w-0">
         <span className="flex flex-wrap items-center gap-2">

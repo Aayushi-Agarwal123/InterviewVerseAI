@@ -97,35 +97,40 @@ export function MentorPage() {
   }
 
   return (
-    <div className="flex max-w-3xl flex-col gap-8">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <PageIntro
         kicker="Mentor"
         title={`Preparing for ${brief.role}.`}
         lede={`${brief.name === "there" ? "Save a profile in Personalized to name the role." : `${brief.name}, the weakest saved area is ${brief.weakest}.`} The mentor only uses rounds and profile fields stored in this browser.`}
       />
-      <dl className="grid gap-px overflow-hidden rounded-2xl bg-border/80 ring-1 ring-foreground/10 sm:grid-cols-3">
+      <dl className="grid gap-3 sm:grid-cols-3">
         <Stat label="Saved average" value={brief.overall === null ? "—" : String(brief.overall)} />
         <Stat label="Model answers" value={String(brief.modelCount)} />
         <Stat label="Local answers" value={String(brief.localCount)} />
       </dl>
-      <div className="flex flex-col gap-3">
+      <div className="panel flex min-h-72 flex-col gap-3 px-4 py-4">
         {career.data.mentor.length === 0 ? (
-          <p className="rounded-2xl bg-card px-5 py-5 text-sm leading-6 text-muted-foreground ring-1 ring-foreground/10">
+          <p className="m-auto max-w-md text-center text-sm leading-6 text-muted-foreground">
             Ask for a practice question, or ask what a hash map, an index, a REST API, or a STAR answer should include.
           </p>
         ) : (
-          career.data.mentor.map((entry, index) => (
-            <article key={`${entry.at}-${index}`} className="rounded-2xl bg-card px-5 py-4 ring-1 ring-foreground/10">
-              <p className="text-[10px] font-medium tracking-[0.16em] text-copper uppercase">
-                {entry.role === "user" ? "You" : entry.source === "gemini" ? "Gemini mentor" : "Local mentor"}
-              </p>
-              <p className="mt-2 text-sm leading-6 whitespace-pre-wrap">{entry.text}</p>
-            </article>
-          ))
+          career.data.mentor.map((entry, index) => {
+            const mine = entry.role === "user";
+            return (
+              <article key={`${entry.at}-${index}`} className={mine ? "ml-8 self-end" : "mr-8 self-start"}>
+                <p className={`mb-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mine ? "text-right text-muted-foreground" : "text-sage"}`}>
+                  {mine ? "You" : entry.source === "gemini" ? "Gemini mentor" : "Local mentor"}
+                </p>
+                <p className={`rounded-2xl px-4 py-3 text-sm leading-6 whitespace-pre-wrap ${mine ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}>
+                  {entry.text}
+                </p>
+              </article>
+            );
+          })
         )}
       </div>
       <form
-        className="flex flex-col gap-3"
+        className="panel flex flex-col gap-3 px-4 py-4"
         onSubmit={(event) => {
           event.preventDefault();
           void ask();
@@ -136,7 +141,7 @@ export function MentorPage() {
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
         {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
         <Button type="submit" className="h-10 w-fit" disabled={pending}>
-          {pending ? "Thinking…" : "Ask"}
+          {pending ? "Thinking…" : "Send"}
         </Button>
       </form>
     </div>
@@ -145,8 +150,8 @@ export function MentorPage() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-card px-4 py-4">
-      <dt className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">{label}</dt>
+    <div className="panel px-4 py-4">
+      <dt className="text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">{label}</dt>
       <dd className="mt-2 font-heading text-3xl tabular-nums">{value}</dd>
     </div>
   );

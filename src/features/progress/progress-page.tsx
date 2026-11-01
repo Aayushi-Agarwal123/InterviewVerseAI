@@ -101,7 +101,7 @@ export function ProgressPage() {
       ) : null}
 
       {completed.length === 0 ? (
-        <div className="rounded-2xl bg-card px-5 py-8 ring-1 ring-foreground/10">
+        <div className="panel px-5 py-8">
           <h2 className="text-3xl tracking-tight">No finished rounds in this view.</h2>
           <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
             An open round does not land here until you close it. Start one, or read the sample debrief from the studio.
@@ -112,7 +112,7 @@ export function ProgressPage() {
         </div>
       ) : (
         <>
-          <section className="rounded-2xl bg-card px-4 py-5 ring-1 ring-foreground/10">
+          <section className="panel px-4 py-5">
             <h2 className="px-1 text-2xl tracking-tight">Last {chart.length}</h2>
             <div className="mt-5 flex h-40 items-end gap-2">
               {chart.map((session) => (
@@ -168,7 +168,7 @@ function Analytics({ sessions }: { sessions: Session[] }) {
       : null;
   return (
     <section className="flex flex-col gap-4">
-      <div className="grid gap-px overflow-hidden rounded-2xl bg-border/80 ring-1 ring-foreground/10 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="All rounds, mixed sources" value={snapshot.overall} detail={`${snapshot.rounds} completed`} />
         <Metric label={snapshot.technical.label} value={snapshot.technical.average} detail={`${snapshot.technical.count} rounds`} />
         <Metric label={snapshot.hr.label} value={snapshot.hr.average} detail={`${snapshot.hr.count} rounds`} />
@@ -183,8 +183,8 @@ function Analytics({ sessions }: { sessions: Session[] }) {
         />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10">
-          <h2 className="text-2xl tracking-tight">Evaluation source</h2>
+        <div className="panel px-5 py-5">
+          <h2 className="font-heading text-2xl tracking-tight">Evaluation source</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Model coach and Local Coach are counted separately. A round can contain both. The mixed overall above is not a single exam.
           </p>
@@ -201,8 +201,8 @@ function Analytics({ sessions }: { sessions: Session[] }) {
             </div>
           </dl>
         </div>
-        <div className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10">
-          <h2 className="text-2xl tracking-tight">Skill progress</h2>
+        <div className="panel px-5 py-5">
+          <h2 className="font-heading text-2xl tracking-tight">Skill progress</h2>
           <ul className="mt-3 flex flex-col gap-2">
             {snapshot.topics.length === 0 ? <li className="text-sm text-muted-foreground">No topic averages yet.</li> : snapshot.topics.map((topic) => (
               <li key={topic.topic} className="flex items-baseline justify-between gap-3 text-sm">
@@ -220,7 +220,7 @@ function Analytics({ sessions }: { sessions: Session[] }) {
 
 function Metric({ label, value, detail }: { label: string; value: number | null; detail: string }) {
   return (
-    <div className="bg-card px-4 py-4">
+    <div className="panel px-4 py-4">
       <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">{label}</p>
       <p className="mt-2 font-heading text-3xl tabular-nums">{value === null ? "—" : value}</p>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p>

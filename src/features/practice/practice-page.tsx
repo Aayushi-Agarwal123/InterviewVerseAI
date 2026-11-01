@@ -20,6 +20,7 @@ import {
 import type { Difficulty, RoleTarget, Topic, Track } from "@/lib/domain";
 import { questionsFor } from "@/lib/engine/session";
 import { voiceSupport } from "@/lib/voice/support";
+import { Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function lengthOptions(count: number): { count: number; label: string }[] {
@@ -104,6 +105,17 @@ export function PracticePage({ voiceMode = false }: { voiceMode?: boolean }) {
               : "Pick the interviewer, the topic, and how hard they push. You can leave early and still get a debrief on the answers you gave."
           }
         />
+        {voiceMode ? (
+          <div className="panel mt-6 flex items-center gap-4 px-5 py-4">
+            <span className="grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-card">
+              <Mic className="size-6" aria-hidden />
+            </span>
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-sage uppercase">Voice round</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{voiceNote}</p>
+            </div>
+          </div>
+        ) : null}
 
         <fieldset className="mt-8">
           <legend className="text-sm font-medium">Interviewer</legend>
@@ -117,12 +129,12 @@ export function PracticePage({ voiceMode = false }: { voiceMode?: boolean }) {
                 className={cn(
                   "rounded-2xl px-4 py-4 text-left ring-1 transition-colors",
                   track === item.id
-                    ? "bg-card ring-primary"
-                    : "bg-card/40 ring-foreground/10 hover:ring-foreground/20",
+                    ? "bg-primary text-primary-foreground ring-primary shadow-card"
+                    : "bg-card ring-foreground/10 hover:bg-secondary/50",
                 )}
               >
                 <span className="block font-medium">{item.label}</span>
-                <span className="mt-1 block text-sm text-muted-foreground">
+                <span className="mt-1 block text-sm opacity-75">
                   {item.kicker}
                 </span>
               </button>
@@ -142,8 +154,8 @@ export function PracticePage({ voiceMode = false }: { voiceMode?: boolean }) {
                 className={cn(
                   "rounded-2xl px-4 py-4 text-left ring-1 transition-colors",
                   topic === item.id
-                    ? "bg-card ring-primary"
-                    : "bg-card/40 ring-foreground/10 hover:ring-foreground/20",
+                    ? "bg-secondary text-secondary-foreground ring-primary/30 shadow-card"
+                    : "bg-card ring-foreground/10 hover:bg-secondary/40",
                 )}
               >
                 <span className="block font-medium">{item.label}</span>
@@ -168,8 +180,8 @@ export function PracticePage({ voiceMode = false }: { voiceMode?: boolean }) {
                   className={cn(
                     "rounded-xl px-3 py-3 text-left ring-1",
                     difficulty === item.id
-                      ? "bg-card ring-primary"
-                      : "ring-transparent hover:bg-card/70",
+                      ? "bg-card shadow-card ring-primary"
+                      : "bg-card/50 ring-foreground/8 hover:bg-card",
                   )}
                 >
                   <span className="block text-sm font-medium">{item.label}</span>
@@ -235,7 +247,7 @@ export function PracticePage({ voiceMode = false }: { voiceMode?: boolean }) {
         </div>
       </div>
 
-      <aside className="h-fit rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10 lg:sticky lg:top-8">
+      <aside className="panel h-fit px-5 py-5 lg:sticky lg:top-24">
         <p className="text-xs font-medium tracking-[0.16em] text-copper uppercase">
           {persona.initials}
         </p>

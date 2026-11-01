@@ -44,7 +44,7 @@ export function JobsPage() {
         lede="The comparison runs in this browser. It looks for a fixed list of skills in the text you paste and the skills you enter. There is no resume upload."
       />
       <form
-        className="flex flex-col gap-4 rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10"
+        className="panel flex flex-col gap-4 px-5 py-5"
         onSubmit={(event) => {
           event.preventDefault();
           compare();
@@ -62,13 +62,19 @@ export function JobsPage() {
         <Button type="submit" className="h-10 w-fit">Compare</Button>
       </form>
       {result ? (
-        <section className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10" aria-live="polite">
-          <p className="font-heading text-5xl tabular-nums">{result.gapPercent}<span className="text-2xl text-muted-foreground">% gap</span></p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{result.note}</p>
-          <SkillList title="Required skills" items={result.required} empty="None recognized." />
-          <SkillList title="Matching skills" items={result.matching} empty="None of your typed skills matched." />
-          <SkillList title="Missing skills" items={result.missing} empty="No missing skills from the recognized list." />
-          <h2 className="mt-6 text-lg">Preparation topics</h2>
+        <section className="panel px-5 py-5" aria-live="polite">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-sage uppercase">Match</p>
+              <p className="mt-2 font-heading text-5xl tabular-nums">{100 - result.gapPercent}<span className="text-2xl text-muted-foreground">%</span></p>
+            </div>
+            <p className="text-sm text-muted-foreground">{result.gapPercent}% of recognized required skills are missing.</p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{result.note}</p>
+          <SkillList title="Required skills" items={result.required} empty="None recognized." tone="neutral" />
+          <SkillList title="Matching skills" items={result.matching} empty="None of your typed skills matched." tone="match" />
+          <SkillList title="Missing skills" items={result.missing} empty="No missing skills from the recognized list." tone="gap" />
+          <h2 className="mt-6 font-heading text-2xl">Recommended practice</h2>
           <ul className="mt-2 flex flex-wrap gap-2">
             {result.topics.length === 0 ? <li className="text-sm text-muted-foreground">No topic mapped yet.</li> : result.topics.map((topic) => (
               <li key={topic}>
@@ -104,13 +110,14 @@ export function JobsPage() {
   );
 }
 
-function SkillList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+function SkillList({ title, items, empty, tone }: { title: string; items: string[]; empty: string; tone: "neutral" | "match" | "gap" }) {
+  const chip = tone === "match" ? "bg-secondary text-secondary-foreground" : tone === "gap" ? "bg-destructive/10 text-destructive" : "bg-muted text-foreground";
   return (
     <div className="mt-4">
       <h2 className="text-sm font-medium">{title}</h2>
       {items.length === 0 ? <p className="mt-1 text-sm text-muted-foreground">{empty}</p> : (
-        <ul className="mt-1 flex flex-wrap gap-2">
-          {items.map((item) => <li key={item} className="rounded-full bg-background px-3 py-1 text-sm ring-1 ring-foreground/10">{item}</li>)}
+        <ul className="mt-2 flex flex-wrap gap-2">
+          {items.map((item) => <li key={item} className={`rounded-full px-3 py-1 text-sm ${chip}`}>{item}</li>)}
         </ul>
       )}
     </div>

@@ -321,7 +321,7 @@ function LiveRound({
         </ol>
       ) : null}
 
-      <article className="rounded-2xl bg-card px-5 py-5 ring-1 ring-foreground/10">
+      <article className="panel px-5 py-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-full bg-primary text-sm text-primary-foreground">

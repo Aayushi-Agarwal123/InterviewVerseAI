@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Mic, Pause, Square, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { voiceSupport } from "@/lib/voice/support";
 
@@ -112,33 +113,50 @@ export function VoiceBar({
     setPaused(false);
   }
 
+  const stateLabel = listening ? "Listening" : paused ? "Paused" : "Ready";
+
   return (
-    <section className="rounded-2xl bg-card px-4 py-4 ring-1 ring-foreground/10" aria-label="Voice interview">
-      <p className="text-xs font-medium tracking-[0.14em] text-copper uppercase">Voice</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{support.label}</p>
+    <section className="panel px-5 py-5" aria-label="Voice interview">
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
+        <button
+          type="button"
+          aria-pressed={listening}
+          disabled={!support.speechRecognition}
+          onClick={listening ? pause : start}
+          className={`grid size-20 shrink-0 place-items-center rounded-full text-primary-foreground shadow-card transition-transform ${listening ? "animate-pulse bg-primary" : "bg-primary hover:scale-105"} disabled:opacity-50`}
+        >
+          {listening ? <Pause className="size-7" aria-hidden /> : <Mic className="size-7" aria-hidden />}
+          <span className="sr-only">{listening ? "Pause microphone" : "Start microphone"}</span>
+        </button>
+        <div className="min-w-0 flex-1 text-center sm:text-left">
+          <p className="text-[11px] font-semibold tracking-[0.16em] text-sage uppercase">{stateLabel}</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{support.label}</p>
+          <p className="mt-2 text-sm leading-6">
+            {listening
+              ? "Final phrases are added to the answer as you speak."
+              : "Nothing is recorded on the server. You can still type the answer."}
+          </p>
+        </div>
+      </div>
       {error ? (
-        <p className="mt-2 text-sm text-destructive" role="alert">
+        <p className="mt-4 text-sm text-destructive" role="alert">
           {error}
         </p>
       ) : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={!support.speechSynthesis} onClick={speak}>
+      <div className="mt-4 flex flex-wrap justify-center gap-2 sm:justify-start">
+        <Button type="button" variant="outline" className="h-10" disabled={!support.speechSynthesis} onClick={speak}>
+          <Volume2 aria-hidden />
           Speak question
         </Button>
-        <Button type="button" variant="outline" disabled={!support.speechRecognition || listening} onClick={start}>
-          {listening ? "Listening" : "Start microphone"}
-        </Button>
-        <Button type="button" variant="outline" disabled={!listening && !paused} onClick={pause}>
+        <Button type="button" variant="outline" className="h-10" disabled={!listening && !paused} onClick={pause}>
+          <Pause aria-hidden />
           Pause
         </Button>
-        <Button type="button" variant="outline" onClick={stop}>
+        <Button type="button" variant="outline" className="h-10" onClick={stop}>
+          <Square aria-hidden />
           Stop
         </Button>
       </div>
-      <p className="mt-3 text-xs leading-5 text-muted-foreground">
-        {listening ? "Microphone is on. Final phrases are added to the answer." : "Nothing is recorded on the server."}{" "}
-        Communication is scored with the rest of the answer when you send it.
-      </p>
     </section>
   );
 }
