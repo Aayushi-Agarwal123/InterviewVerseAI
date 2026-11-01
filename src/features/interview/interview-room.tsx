@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -47,11 +47,24 @@ import { getQuestion } from "@/lib/questions";
 import { wordCount } from "@/lib/text";
 import { RoomSkeleton } from "@/features/interview/room-skeleton";
 
+function subscribeToClient(): () => void {
+  return () => {};
+}
+
+function clientIsReady(): boolean {
+  return true;
+}
+
+function serverIsWaiting(): boolean {
+  return false;
+}
+
 export function InterviewRoom({ id }: { id: string }) {
   const store = useSessions();
   const router = useRouter();
+  const hydrated = useSyncExternalStore(subscribeToClient, clientIsReady, serverIsWaiting);
 
-  if (store.status === "loading") return <RoomSkeleton />;
+  if (!hydrated || store.status === "loading") return <RoomSkeleton />;
   if (store.status === "error") {
     return <StorageError message={store.message} onReset={store.clear} />;
   }

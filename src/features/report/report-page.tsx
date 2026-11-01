@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { ScoreFigure, ScoreMeter } from "@/components/score-meter";
 import { useCoachMode } from "@/components/shell/coach-mark";
@@ -24,9 +24,23 @@ import { buildReport } from "@/lib/engine/score";
 import { getQuestion } from "@/lib/questions";
 import { RoomSkeleton } from "@/features/interview/room-skeleton";
 
+function subscribeToClient(): () => void {
+  return () => {};
+}
+
+function clientIsReady(): boolean {
+  return true;
+}
+
+function serverIsWaiting(): boolean {
+  return false;
+}
+
 export function ReportPage({ id }: { id: string }) {
   const store = useSessions();
-  if (store.status === "loading") return <RoomSkeleton />;
+  const hydrated = useSyncExternalStore(subscribeToClient, clientIsReady, serverIsWaiting);
+
+  if (!hydrated || store.status === "loading") return <RoomSkeleton />;
   if (store.status === "error") {
     return <StorageError message={store.message} onReset={store.clear} />;
   }
