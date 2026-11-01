@@ -28,6 +28,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       className={`${sans.variable} ${display.variable} h-full antialiased`}
+      // One level deep: accept an extension attribute on this element only.
+      // Body, buttons, and inputs still report their own hydration mismatches.
+      suppressHydrationWarning
     >
       <body className="min-h-full">
         <SessionProvider>
