@@ -13,9 +13,11 @@ export function SessionRow({ session }: { session: Session }) {
   const topic = topicById(session.config.topic);
   const persona = personaFor(session.config.track);
   const href =
-    session.status === "active"
-      ? `/interview/${session.id}`
-      : `/report/${session.id}`;
+    session.status !== "active"
+      ? `/report/${session.id}`
+      : session.kind === "avatar"
+        ? `/avatar/${session.id}`
+        : `/interview/${session.id}`;
   const score = session.report?.overall;
   const band = score === undefined ? undefined : scoreBand(score);
 

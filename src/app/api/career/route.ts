@@ -3,6 +3,8 @@ import { readCoachConfig } from "@/lib/coach/config";
 import { mentorBrief, mentorReply } from "@/lib/career/mentor";
 import { parseProfile } from "@/lib/career/profile";
 import { planInterview } from "@/lib/career/plan";
+import { nextAvatarQuestion, type AvatarExchange } from "@/lib/avatar/engine";
+import type { AvatarInterviewer } from "@/lib/avatar/provider";
 import type { Session } from "@/lib/domain";
 
 const MAX_BODY_BYTES = 64_000;
@@ -80,6 +82,35 @@ export async function POST(request: Request) {
     );
     const reply = await mentorReply(message, mentorBrief(profile.value, sessions), config);
     return respond(reply, 200, config.apiKey);
+  }
+  if (record.action === "avatar-next") {
+    const profile = parseProfile(record.profile);
+    if (!profile.ok) return respond({ error: profile.error }, 400, config.apiKey);
+    const interviewer: AvatarInterviewer =
+      record.interviewer === "leela" || record.interviewer === "mixed" ? record.interviewer : "arun";
+    const askedIds = Array.isArray(record.askedIds)
+      ? record.askedIds.filter((item): item is string => typeof item === "string").slice(0, 8)
+      : [];
+    const history: AvatarExchange[] = Array.isArray(record.history)
+      ? record.history
+          .filter((item): item is AvatarExchange => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+            const row = item as AvatarExchange;
+            return typeof row.prompt === "string" && typeof row.answer === "string";
+          })
+          .slice(-4)
+          .map((item) => ({ prompt: item.prompt.slice(0, 300), answer: item.answer.slice(0, 600) }))
+      : [];
+    const turn = await nextAvatarQuestion(profile.value, askedIds, history, interviewer, config);
+    return respond(
+      {
+        source: turn.source,
+        notice: turn.notice,
+        question: turn.question,
+      },
+      200,
+      config.apiKey,
+    );
   }
   return respond({ error: "Unknown career action." }, 400, config.apiKey);
 }

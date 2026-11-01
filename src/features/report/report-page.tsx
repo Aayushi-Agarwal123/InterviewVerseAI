@@ -50,7 +50,7 @@ export function ReportPage({ id }: { id: string }) {
         <Button
           className="mt-6 h-10"
           nativeButton={false}
-          render={<Link href={`/interview/${session.id}`} />}
+          render={<Link href={session.kind === "avatar" ? `/avatar/${session.id}` : `/interview/${session.id}`} />}
         >
           Return to the round
         </Button>

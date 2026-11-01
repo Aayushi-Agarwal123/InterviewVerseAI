@@ -1,6 +1,6 @@
 # InterviewVerse AI
 
-Practice a technical round, an HR conversation, a profile-based interview, or a spoken round, then leave with a score you can compare to the last one.
+Practice a technical round, an HR conversation, a profile-based interview, a spoken round, or an AI avatar interview, then leave with a score you can compare to the last one.
 
 InterviewVerse AI is a single-user studio. You pick an interviewer, answer in writing, and get a debrief on five dimensions: relevance, structure, specificity, depth, and communication. History stays in this browser. There is no account.
 
@@ -95,7 +95,8 @@ In AI mode the model writes the follow-up from the answer you gave. Warm-up stil
 - **Studio** — open round, averages, streak, and the paths into the rest of the studio.
 - **Question interview** — technical (Arun Mehta) or HR (Leela Kapoor), topic, pressure, length, timer, follow-up, debrief.
 - **Personalized interview** — profile fields, Gemini questions when configured, otherwise the question bank chosen for those skills. Difficulty can swap the next prompt after a thin or strong answer.
-- **Voice** — browser speech synthesis and speech recognition, with a typed answer when either is missing or permission is denied.
+- **AI avatar interview** — a separate room at `/avatar`. Arun Mehta (technical) and Leela Kapoor (HR) are illustrated. The browser speaks the question and, when allowed, transcribes the microphone. Mute, replay, pause, resume, and end are in the room. An optional camera is a real self-view, video only. There is no third-party video avatar and no phoneme lip-sync: the mouth is a CSS animation while speech synthesis is speaking. Gemini writes the next question and can score an answer only when the server coach is already configured. Otherwise the local interviewer and Local Coach run, and the screen says so. A paid streaming avatar (Simli, HeyGen, or D-ID) is not connected; those services bill per minute and would need their own key behind `src/lib/avatar/provider.ts`.
+- **Voice** — browser speech synthesis and speech recognition on the question-bank round, with a typed answer when either is missing or permission is denied. This is not the avatar room.
 - **Roadmap** — daily, weekly, and skill tasks from saved scores. Checks stay in this browser.
 - **Mentor** — one next action from the saved profile and rounds. Gemini when configured, otherwise a local reply.
 - **Coding arena** — original problems, visible sample cases, JavaScript in a browser worker. Other languages are saved and not run. The server does not execute solutions.

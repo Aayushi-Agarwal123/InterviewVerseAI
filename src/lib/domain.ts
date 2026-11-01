@@ -117,7 +117,7 @@ export type Report = {
   coach?: ReportCoach;
 };
 
-export type SessionKind = "bank" | "personalized" | "voice";
+export type SessionKind = "bank" | "personalized" | "voice" | "avatar";
 
 export type Session = {
   id: string;

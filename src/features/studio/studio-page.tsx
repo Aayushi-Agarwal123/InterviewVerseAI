@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Code2, Mic, MessagesSquare, Sparkles } from "lucide-react";
+import { Code2, Mic, MessagesSquare, Sparkles, Video } from "lucide-react";
 import { ScoreMeter } from "@/components/score-meter";
 import { SessionRow } from "@/components/session-row";
 import { useCareer } from "@/components/shell/career-store";
@@ -90,7 +90,10 @@ export function StudioPage() {
             Technical depth and HR judgment, scored on the same five dimensions. History stays in this browser.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button className="h-10 bg-primary-foreground text-primary hover:bg-primary-foreground/90" nativeButton={false} render={<Link href="/practice" />}>
+            <Button className="h-10 bg-primary-foreground text-primary hover:bg-primary-foreground/90" nativeButton={false} render={<Link href="/avatar" />}>
+              AI avatar interview
+            </Button>
+            <Button className="h-10 border-white/30 bg-transparent text-primary-foreground hover:bg-white/10" variant="outline" nativeButton={false} render={<Link href="/practice" />}>
               Question interview
             </Button>
             <Button className="h-10 border-white/30 bg-transparent text-primary-foreground hover:bg-white/10" variant="outline" nativeButton={false} render={<Link href="/personalized" />}>
@@ -120,10 +123,25 @@ export function StudioPage() {
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-3" aria-label="Start an interview">
-        <QuickAction href="/practice" icon={MessagesSquare} kicker="Question bank" title="Question interview" body="One prompt at a time, with the timer, follow-up rule, and debrief." />
-        <QuickAction href="/personalized" icon={Sparkles} kicker="From your profile" title="Personalized interview" body="Gemini writes the round when configured. Otherwise the bank is matched to your skills." />
-        <QuickAction href="/voice" icon={Mic} kicker="Browser speech" title="Voice interview" body="Speak the question and transcribe the microphone when the browser allows it." />
+      <section className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]" aria-label="Start an interview">
+        <Link href="/avatar" className="group flex flex-col justify-between rounded-3xl bg-primary px-6 py-6 text-primary-foreground shadow-card transition-transform hover:-translate-y-0.5">
+          <span>
+            <span className="grid size-11 place-items-center rounded-2xl bg-primary-foreground/15">
+              <Video className="size-5" aria-hidden />
+            </span>
+            <p className="mt-5 text-[10px] font-semibold tracking-[0.16em] text-primary-foreground/70 uppercase">Person to person</p>
+            <h2 className="mt-1 font-heading text-3xl tracking-tight">AI avatar interview</h2>
+            <p className="mt-2 max-w-md text-sm leading-6 text-primary-foreground/80">
+              Arun Mehta or Leela Kapoor speaks the question. You answer on the microphone. The next question follows what you just said.
+            </p>
+          </span>
+          <span className="mt-6 text-sm font-medium">Open the interview room</span>
+        </Link>
+        <div className="grid gap-3">
+          <QuickAction href="/practice" icon={MessagesSquare} kicker="Question bank" title="Question interview" body="One prompt at a time, with the timer, follow-up rule, and debrief." />
+          <QuickAction href="/personalized" icon={Sparkles} kicker="From your profile" title="Personalized interview" body="Gemini writes the round when configured. Otherwise the bank is matched to your skills." />
+          <QuickAction href="/voice" icon={Mic} kicker="Browser speech" title="Voice interview" body="Speak the question and transcribe the microphone when the browser allows it." />
+        </div>
       </section>
 
       {active ? <ActiveBanner session={active} /> : null}
@@ -284,7 +302,7 @@ function ActiveBanner({ session }: { session: Session }) {
           {session.config.topic.replace("-", " ")} · question {session.index + 1} of {session.questionIds.length}
         </span>
       </p>
-      <Button variant="outline" className="h-9" nativeButton={false} render={<Link href={`/interview/${session.id}`} />}>
+      <Button variant="outline" className="h-9" nativeButton={false} render={<Link href={session.kind === "avatar" ? `/avatar/${session.id}` : `/interview/${session.id}`} />}>
         Resume
       </Button>
     </div>

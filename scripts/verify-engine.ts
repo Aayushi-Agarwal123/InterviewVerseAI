@@ -1,3 +1,6 @@
+import { nextAvatarQuestion, nextLocalAvatarQuestion, interviewerTrack } from "../src/lib/avatar/engine";
+import { ILLUSTRATED_AVATAR } from "../src/lib/avatar/provider";
+import { answerAvatar, closeAvatar } from "../src/lib/avatar/turn";
 import { performanceSnapshot } from "../src/lib/career/analytics";
 import { sealCustomQuestion } from "../src/lib/career/custom";
 import { matchJob } from "../src/lib/career/match";
@@ -1935,6 +1938,183 @@ const sourceSplit = performanceSnapshot([
 assert(sourceSplit.model.count === 1 && sourceSplit.local.count === 1, "model and local answers stay separate");
 assert(sourceSplit.technical.count === 1 && sourceSplit.hr.count === 1, "technical and hr rounds stay separate");
 assert(sourceSplit.model.average === 80 && sourceSplit.local.average === 40, "source averages are not blended");
+
+assert(ILLUSTRATED_AVATAR.lipSync === false && ILLUSTRATED_AVATAR.paid === false, "illustrated avatar is not a paid lip-sync service");
+const avatarParsed = parseProfile({
+  name: "Asha",
+  qualification: "B.Tech",
+  college: "NIT",
+  skills: ["React", "Node.js"],
+  experience: "fresher",
+  years: 0,
+  role: "Frontend engineer",
+  company: "Northwind",
+  interviewType: "technical",
+  difficulty: "standard",
+  durationMinutes: 15,
+});
+assert(avatarParsed.ok, "avatar profile parses");
+if (avatarParsed.ok) {
+  const avatarProfile = avatarParsed.value;
+  assert(interviewerTrack("arun", avatarProfile, 0) === "technical", "arun stays on the technical track");
+  assert(interviewerTrack("leela", avatarProfile, 1) === "hr", "leela stays on the hr track");
+  assert(interviewerTrack("mixed", avatarProfile, 1) === "hr", "mixed avatar alternates tracks");
+  assert(questionBudget(avatarProfile.durationMinutes) === 3, "a 15 minute avatar round asks three questions");
+
+  let avatarFetches = 0;
+  const avatarFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    avatarFetches += 1;
+    return geminiResponse(500, {});
+  }) as typeof fetch;
+  try {
+    const localTurn = await nextAvatarQuestion(
+      avatarProfile,
+      [],
+      [],
+      "arun",
+      readCoachConfig({ INTERVIEWVERSE_COACH_PROVIDER: "local" }),
+    );
+    assert(avatarFetches === 0 && localTurn.source === "local", "local avatar question does not fetch");
+    assert(localTurn.notice.toLowerCase().includes("local"), "local avatar notice names the local interviewer");
+    assert(!localTurn.notice.toLowerCase().includes("gemini wrote"), "local avatar notice is not labeled as gemini");
+    assert(localTurn.question.track === "technical", "arun's local question is technical");
+    const placeholderTurn = await nextAvatarQuestion(
+      avatarProfile,
+      [],
+      [],
+      "leela",
+      readCoachConfig({
+        INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+        INTERVIEWVERSE_COACH_API_KEY: "YOUR_GEMINI_API_KEY",
+        INTERVIEWVERSE_COACH_MODEL: "YOUR_MODEL_ID",
+      }),
+    );
+    assert(avatarFetches === 0 && placeholderTurn.source === "local" && placeholderTurn.question.track === "hr", "placeholder gemini config does not fetch an avatar question");
+  } finally {
+    globalThis.fetch = avatarFetch;
+  }
+
+  const geminiAvatar = await withFetch(
+    () =>
+      geminiResponse(200, {
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    track: "technical",
+                    topic: "frontend",
+                    difficulty: "standard",
+                    prompt: "How would you keep a React list fast when the candidate filters ten thousand rows?",
+                    setup: "A frontend screen with a large list.",
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    () =>
+      nextAvatarQuestion(
+        avatarProfile,
+        ["dsa-two-sum"],
+        [{ prompt: "Tell me about React.", answer: "I would start with keys and virtualization." }],
+        "arun",
+        geminiConfig,
+      ),
+  );
+  assert(geminiAvatar.calls.length === 1 && geminiAvatar.result.source === "gemini", "gemini avatar question is labeled");
+  assert(geminiAvatar.result.notice.includes("Gemini wrote"), "gemini avatar notice names the model");
+  assert(geminiAvatar.result.question.prompt.includes("React"), "gemini avatar prompt is kept");
+  assert(geminiAvatar.result.question.track === "technical", "gemini avatar track follows the interviewer");
+  assert(!geminiAvatar.calls[0]?.url.includes(secret) && !geminiAvatar.calls[0]?.url.includes("key="), "avatar key stays out of the url");
+
+  const opening = nextLocalAvatarQuestion(avatarProfile, [], "arun");
+  const avatarSession = createSession(
+    {
+      track: opening.track,
+      topic: opening.topic,
+      difficulty: "standard",
+      role: "frontend",
+      questionCount: 3,
+      focus: "React",
+    },
+    {
+      now: "2026-04-04T10:00:00.000Z",
+      questionIds: [opening.id],
+      prompts: { [opening.id]: opening },
+      kind: "avatar",
+      durationMinutes: 15,
+      promptNotes: { "avatar-interviewer": "arun", [opening.id]: "Local interviewer." },
+    },
+  );
+  const followed = answerAvatar(
+    avatarSession,
+    "We did the work.",
+    "2026-04-04T10:01:00.000Z",
+    {
+      source: "local",
+      score: scoreAnswer({
+        question: opening,
+        text: "We did the work.",
+        hintUsed: false,
+        difficulty: "standard",
+      }),
+      followUp: "What fails first, and how would you know?",
+      strengths: [],
+      improvements: ["Name the failure."],
+      tips: [],
+    },
+    null,
+    3,
+  );
+  assert(followed.phase === "followup" && followed.status === "active" && followed.turns.length === 0, "a thin avatar answer gets one follow-up");
+  const second = nextLocalAvatarQuestion(avatarProfile, followed.questionIds, "arun");
+  assert(second.id !== opening.id, "the next local avatar question is not a repeat");
+  const continued = answerAvatar(
+    followed,
+    "I wrote the filter myself and the result was a shorter list.",
+    "2026-04-04T10:02:00.000Z",
+    undefined,
+    second,
+    3,
+  );
+  assert(
+    continued.status === "active" && continued.turns.length === 1 && continued.questionIds.at(-1) === second.id,
+    "the next avatar question stays inside the budget",
+  );
+  assert(continued.turns[0]?.coach === undefined, "a local avatar turn is not stored as model coach");
+  const aiScore = continued.turns[0]?.score;
+  assert(aiScore, "the committed avatar turn has a local score");
+  if (aiScore) {
+    const ended = answerAvatar(
+      continued,
+      "I would measure the render cost before changing the list.",
+      "2026-04-04T10:03:00.000Z",
+      {
+        source: "ai",
+        score: aiScore,
+        strengths: ["Names a measurement."],
+        improvements: ["Add the list size."],
+        tips: ["Say what you would profile."],
+        sampleAnswer: "I would virtualize the list and measure the frame time.",
+        followUp: "Why not pagination?",
+      },
+      null,
+      3,
+      true,
+    );
+    assert(ended.status === "completed" && ended.kind === "avatar" && ended.report, "ending the avatar round saves a report");
+    assert(ended.turns.at(-1)?.coach?.source === "ai", "only the model verdict is stored as model coach");
+    assert(ended.turns[0]?.coach === undefined, "the earlier local turn stays local");
+    assert(ended.report?.dimensions.relevance !== undefined && ended.report.dimensions.depth !== undefined, "avatar report keeps the five dimensions");
+  }
+  assert(closeAvatar(avatarSession, "2026-04-04T10:04:00.000Z") === null, "an avatar round with no answer does not save");
+  const openFollowUp = answerAvatar(followed, "", "2026-04-04T10:05:00.000Z", undefined, null, 3, true);
+  assert(openFollowUp.status === "completed" && openFollowUp.turns.length === 1 && !openFollowUp.turns[0]?.followUpAnswer, "ending during a follow-up keeps the first answer");
+}
 
 console.log(
   `engine ok: ${QUESTIONS.length} prompts, strong ${strong.overall}, weak ${weak.overall}, sample ${sample.report?.overall}`,

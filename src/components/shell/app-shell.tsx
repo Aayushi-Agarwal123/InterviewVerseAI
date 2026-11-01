@@ -17,6 +17,7 @@ import {
   Mic,
   MoreHorizontal,
   Sparkles,
+  Video,
 } from "lucide-react";
 import { CoachMark } from "@/components/shell/coach-mark";
 import { useCareer } from "@/components/shell/career-store";
@@ -38,6 +39,7 @@ const GROUPS: { label: string; links: { href: string; label: string; icon: Icon 
       { href: "/", label: "Studio", icon: LayoutDashboard },
       { href: "/practice", label: "Question interview", icon: MessagesSquare },
       { href: "/personalized", label: "Personalized", icon: Sparkles },
+      { href: "/avatar", label: "AI avatar interview", icon: Video },
       { href: "/voice", label: "Voice", icon: Mic },
     ],
   },
@@ -79,6 +81,7 @@ function isCurrent(pathname: string, href: string): boolean {
 
 function pageMeta(pathname: string): { kicker: string; title: string } {
   if (pathname.startsWith("/interview")) return { kicker: "Prepare", title: "Live round" };
+  if (pathname.startsWith("/avatar/")) return { kicker: "Prepare", title: "Avatar interview" };
   if (pathname.startsWith("/report")) return { kicker: "Review", title: "Debrief" };
   for (const group of GROUPS) {
     const link = group.links.find((item) => isCurrent(pathname, item.href));
