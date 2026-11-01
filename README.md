@@ -1,110 +1,317 @@
 # InterviewVerse AI
 
-Practice a technical round, an HR conversation, a profile-based interview, a spoken round, or an AI avatar interview, then leave with a score you can compare to the last one.
+**An AI-powered interview preparation studio for technical, HR, personalized, voice, and avatar-based practice.**
 
-InterviewVerse AI is a single-user studio. You pick an interviewer, answer in writing, and get a debrief on five dimensions: relevance, structure, specificity, depth, and communication. History stays in this browser. There is no account.
+Practice a technical round, an HR conversation, a profile-based interview, a spoken round, or an AI avatar interview. Get a score across five dimensions and compare your performance with previous sessions.
 
-The coach can call Google Gemini or an OpenAI-compatible model from a server route. With no API key, the same screens use the local rubric. The key never ships to the browser. Gemini mode sends answers to Google's API. Nothing in this app turns on paid billing.
+InterviewVerse AI is a single-user, browser-based interview practice studio. Choose an interviewer, answer questions in writing or by voice, and receive a debrief covering:
 
-## Run it
+- Relevance
+- Structure
+- Specificity
+- Depth
+- Communication
 
-```bash
-npm install
-npm run dev
-```
+Your interview history and learning data stay in your browser. No account or registration is required.
 
-Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
+---
 
-## Model coach
+## Features
 
-Copy `.env.example` to `.env.local` and set the key. Restart `npm run dev` after changing it.
+### 1. Studio Dashboard
+- View interview activity, average scores, and streaks.
+- Access interview modes and other learning modules.
+- Track your preparation from one dashboard.
 
-```bash
+### 2. Question-Based Interview
+- Technical interviews with **Arun Mehta**.
+- HR interviews with **Leela Kapoor**.
+- Choose topics, difficulty, pressure mode, and interview length.
+- Get follow-up questions and a final performance debrief.
+
+### 3. Personalized Interview
+- Build a candidate profile using your experience, skills, qualification, and target role.
+- Get questions based on your profile.
+- Adjust difficulty based on answer performance.
+- Use Gemini-generated questions when AI mode is configured; otherwise, the local question bank is used.
+
+### 4. AI Avatar Interview
+- Dedicated interview room at `/avatar`.
+- Technical, HR, and mixed interview modes.
+- Illustrated interviewer avatars with speaking, listening, thinking, and idle states.
+- Browser-based speech synthesis and microphone transcription.
+- Mute, replay, pause, resume, and end controls.
+- Optional camera-based self-view.
+
+**Current limitations:** The avatars use CSS-based mouth animation during speech synthesis. Real-time phoneme lip-sync and third-party streaming video avatars are not implemented.
+
+### 5. Voice Interview
+- Browser speech synthesis for interview questions.
+- Speech recognition for spoken answers when supported.
+- Typed-answer fallback when speech recognition is unavailable or permission is denied.
+
+### 6. AI Project Builder
+Open **AI Project Builder** from the navigation.
+
+Describe a project, choose a technology stack, and generate a downloadable ZIP.
+
+Supported starter stacks:
+- React + Vite + TypeScript
+- Next.js + TypeScript
+- Node.js + Express + TypeScript
+- React + Express + MongoDB
+
+When Gemini is configured, it generates project source files in validated batches. Otherwise, the application uses local project templates.
+
+The builder includes:
+- Project configuration and source generation.
+- Frontend and backend starter files.
+- Database integration for supported stacks.
+- Generated-file validation.
+- Implemented and missing feature reports.
+- ZIP download.
+
+Generated code is not installed or executed on the InterviewVerse AI server. The ZIP does not contain `node_modules` or API keys.
+
+### 7. Additional Learning Modules
+- **Roadmap:** Daily, weekly, and skill-based preparation tasks.
+- **Mentor:** Suggested next actions based on saved profile and interview performance.
+- **Coding Arena:** Original coding problems with visible sample test cases. JavaScript solutions run in a browser worker; other languages are saved but not executed.
+- **Job Match:** Compare skills with a pasted job description. No resume upload is required.
+- **Memory:** View or clear interview rounds, profile, roadmap checks, and learning notes separately.
+- **Progress:** Track overall performance and compare AI Coach and Local Coach results separately.
+
+---
+
+## AI Model Configuration
+
+The coach supports Google Gemini, OpenAI-compatible models, and a local rubric-based fallback.
+
+The API key is read by the server and is never sent to the browser.
+
+### Setup
+
+1. Copy `.env.example` to `.env.local`.
+2. Add your provider configuration.
+3. Restart the development server after changing environment variables.
+
+Example:
+
+```env
 INTERVIEWVERSE_COACH_PROVIDER=gemini
-INTERVIEWVERSE_COACH_API_KEY=
-INTERVIEWVERSE_COACH_MODEL=
+INTERVIEWVERSE_COACH_API_KEY=your_api_key
+INTERVIEWVERSE_COACH_MODEL=your_model_id
 INTERVIEWVERSE_COACH_BASE_URL=
 ```
 
+### Environment Variables
+
 | Variable | Required | Purpose |
-| --- | --- | --- |
-| `INTERVIEWVERSE_COACH_API_KEY` | For AI mode | Server-only secret. Leave empty for the local rubric. |
-| `INTERVIEWVERSE_COACH_PROVIDER` | No | `gemini`, `openai`, or `local`. An empty value with a key still selects OpenAI. |
-| `INTERVIEWVERSE_COACH_MODEL` | For Gemini | Gemini model ID from your project. OpenAI defaults to `gpt-4o-mini` when this is empty. |
-| `INTERVIEWVERSE_COACH_BASE_URL` | No | Empty uses the provider default: Gemini `https://generativelanguage.googleapis.com/v1beta`, OpenAI `https://api.openai.com/v1`. |
+|---|---|---|
+| `INTERVIEWVERSE_COACH_API_KEY` | For AI mode | Server-only API secret. Leave empty to use the local rubric. |
+| `INTERVIEWVERSE_COACH_PROVIDER` | No | `gemini`, `openai`, or `local`. |
+| `INTERVIEWVERSE_COACH_MODEL` | For Gemini | Gemini model ID. OpenAI defaults to `gpt-4o-mini` when empty. |
+| `INTERVIEWVERSE_COACH_BASE_URL` | No | Optional provider base URL. Empty uses the provider default. |
 
-Gemini uses the Developer API's `generateContent` request, not the OpenAI chat format. The key is sent as `x-goog-api-key` and is not put in the URL. A placeholder model such as `YOUR_MODEL_ID`, or a placeholder key, stays on the local coach and is not sent. A rejected key, a key restricted to a browser or IP address, a disabled Generative Language API, an unknown model, a malformed request, a rate limit, a quota error, or an unreadable reply is not retried. The answer is scored by the local rubric and kept. The sidebar says **Gemini AI Coach** or **Local Coach**, and says when answers are sent to Google.
+Default provider URLs:
 
-## AI Project Builder
+- Gemini: `https://generativelanguage.googleapis.com/v1beta`
+- OpenAI: `https://api.openai.com/v1`
 
-Open **AI Project Builder** in the navigation. Describe a product, pick a stack, and download a ZIP. The four starters are React + Vite + TypeScript, Next.js + TypeScript, Node.js + Express + TypeScript, and React + Express + MongoDB.
+Gemini uses the Developer API's `generateContent` request format and sends the key through the `x-goog-api-key` header.
 
-Gemini is used only when the server is already in Gemini mode with a model ID. It writes source files in checked batches: project configuration, frontend, backend, database when the stack has one, and documentation. Each file needs a relative path and is rejected if it is absolute, traverses directories, or is a secret, an API key, or `node_modules`. The preview labels the result **Gemini AI-generated project** or **Local Template-generated project**.
+### Local Fallback and Error Handling
 
-Express and full-stack starters register list, create, update, and delete for `/api/items`. The full-stack client calls those routes. MongoDB is used only when that database is selected and `MONGODB_URI` is set. A validation report lists Gemini files, template files, implemented features, missing features, and errors. A route counts only when it calls an imported store function. A database operation counts only when that function calls the MongoDB driver. A word in a comment does not count. `package.json` scripts and imports are checked, and generated code is never installed or run on this server. The report tells you how to download, extract, install, and run the project locally. A rejected key, a restricted key, a disabled Generative Language API, an unknown model, a malformed request, a rate limit, a quota error, or an unreadable reply uses the **Local Template Builder** and does not call the starter AI-generated. The ZIP is built in memory. It has no `node_modules` and no API key.
+- With no valid API configuration, the application uses the Local Coach.
+- Placeholder API keys and model IDs are not sent to the provider.
+- Failed model requests fall back to the local rubric.
+- Invalid keys, restricted keys, disabled APIs, unknown models, malformed requests, quota errors, and rate limits are not automatically retried.
+- The user's submitted answer is retained even when a model request fails.
+- The interface identifies whether the session uses Gemini AI Coach or Local Coach.
 
-OpenAI remains available. Set `INTERVIEWVERSE_COACH_PROVIDER=openai` and a model such as `gpt-4o-mini`. Local mode does not invent a sample answer or a model debrief.
+**Privacy note:** In Gemini mode, interview answers are sent to Google's API for processing. Use the local mode if you do not want answers sent to an external model provider.
+
+Nothing in the application automatically enables paid billing.
+
+---
+
+## Interview Scoring System
+
+Each interview prompt includes:
+- Signals that indicate a strong answer.
+- Follow-up probes.
+- An outline describing a stronger answer structure.
+
+When an answer is submitted:
+
+1. The five scoring dimensions are evaluated.
+2. The system checks whether important answer signals are missing.
+3. A follow-up may be generated according to the selected interview mode.
+4. The final debrief averages the answers and recommends the next round.
+
+### Scoring Weights
+
+| Dimension | Weight |
+|---|---:|
+| Relevance | 0.18 |
+| Structure | 0.20 |
+| Specificity | 0.18 |
+| Depth | 0.28 |
+| Communication | 0.16 |
+
+The overall score uses the same weights for comparable results across sessions.
+
+A nudge reveals one answer signal and slightly caps the depth score. The debrief outline is intended as guidance, not a script to memorize.
+
+In AI mode, the model can generate follow-up questions based on the submitted answer. If a generated follow-up repeats the original prompt or is unusable, the question bank's probe is used instead.
+
+---
+
+## Installation and Local Development
+
+### Prerequisites
+- Node.js
+- npm
+
+### 1. Clone the Repository
 
 ```bash
-npm run verify   # rubric and session checks
+git clone https://github.com/Aayushi-Agarwal123/InterviewVerseAI.git
+cd InterviewVerseAI
+```
+
+### 2. Install Dependencies
+
+```bash
+npm install
+```
+
+### 3. Start the Development Server
+
+```bash
+npm run dev
+```
+
+Open:
+
+[http://127.0.0.1:43123](http://127.0.0.1:43123)
+
+### 4. Optional: Configure AI Mode
+
+Follow the environment-variable instructions above to configure Gemini or an OpenAI-compatible provider.
+
+---
+
+## Validation Commands
+
+Run the following commands to verify the project:
+
+```bash
+npm run verify
 npm run lint
 npm run build
 ```
 
-## Stack
+- `npm run verify` checks rubric and session behavior.
+- `npm run lint` checks code quality.
+- `npm run build` creates a production build.
 
-- Next.js (App Router) and React
-- TypeScript
-- Tailwind CSS
-- shadcn/ui primitives (Base UI)
+---
 
-The rubric still runs on the device when no key is set. With a key, the server asks the model for the five scores, a follow-up, and a sample answer, then stores that on the same session.
+## Technology Stack
 
-## Architecture
+- **Next.js** — App Router and server routes
+- **React** — User interface
+- **TypeScript** — Application logic and type safety
+- **Tailwind CSS** — Styling
+- **shadcn/ui** — UI primitives using Base UI
+- **Google Gemini API** — Optional AI coach and project generation
+- **OpenAI-compatible API** — Optional model provider
+- **Browser APIs** — Speech synthesis, speech recognition, camera preview, and Web Workers
+- **LocalStorage** — Browser-based session and learning data
 
+---
+
+## Project Architecture
+
+```text
+src/
+├── app/
+│   ├── studio/
+│   ├── practice/
+│   ├── round/
+│   ├── debrief/
+│   ├── progress/
+│   └── api/
+│       └── coach/
+│
+├── components/
+│   ├── ui/
+│   └── shell/
+│
+├── features/
+│
+└── lib/
+    ├── domain.ts
+    ├── questions/
+    ├── engine/
+    │   ├── score.ts
+    │   └── session.ts
+    ├── coach/
+    └── storage.ts
 ```
-src/app                     routes: studio, practice, round, debrief, progress
-src/components/ui           shadcn primitives
-src/components/shell        navigation and the browser session store
-src/features                one screen per folder
-src/lib/domain.ts           session, question, and score types
-src/lib/questions           prompt bank, grouped by track and topic
-src/lib/engine/score.ts     rubric: signals, follow-ups, debrief
-src/lib/engine/session.ts   round state machine
-src/lib/coach               model provider, prompts, and the local fallback
-src/app/api/coach           server route that reads the key
-src/lib/storage.ts          versioned localStorage repository
-```
 
-The round state machine is pure. React only reads and writes `Session` objects. The browser calls `/api/coach` only when the server reports AI mode. The route scores with the rubric when no key is set, and again when the model request fails.
+### Core Architecture
 
-### What the coach actually does
+- `src/lib/domain.ts` — Session, question, and scoring types.
+- `src/lib/questions` — Question bank grouped by track and topic.
+- `src/lib/engine/score.ts` — Rubric signals, follow-ups, and debrief logic.
+- `src/lib/engine/session.ts` — Pure interview round state machine.
+- `src/lib/coach` — Model provider, prompts, and local fallback.
+- `src/app/api/coach` — Server route that reads the API key and handles coach requests.
+- `src/lib/storage.ts` — Versioned LocalStorage repository.
+- `src/components/shell` — Navigation and browser session store.
 
-Each prompt carries signals (phrases a strong answer tends to include), follow-up probes, and an outline of a stronger shape. Submitting an answer:
+The interview round state machine is independent of React. React reads and updates `Session` objects, while the browser calls `/api/coach` only when the server reports AI mode.
 
-1. Scores the five dimensions from the text.
-2. On Standard, asks one follow-up when a core signal is missing. Warm-up never does. Pressure does whenever a probed signal is missing.
-3. At the end, averages the answers into a debrief and names the next round.
+When no key is configured, the local rubric handles scoring. If a model request fails, the local rubric is used again.
 
-A nudge reveals one signal and caps depth slightly. The outline on the debrief is a shape, not a script to memorize.
+---
 
-In AI mode the model writes the follow-up from the answer you gave. Warm-up still never follows up. A follow-up that repeats the prompt is discarded, and the bank probe is used when the model does not offer a usable one. Hit and missed signals stay on the rubric, so the badges remain comparable. The overall score still uses the same weights: relevance 0.18, structure 0.20, specificity 0.18, depth 0.28, communication 0.16. A failed model call does not drop the text you typed.
+## Data Storage
 
-## Modules
+InterviewVerse AI uses browser-based storage:
 
-- **Studio** — open round, averages, streak, and the paths into the rest of the studio.
-- **Question interview** — technical (Arun Mehta) or HR (Leela Kapoor), topic, pressure, length, timer, follow-up, debrief.
-- **Personalized interview** — profile fields, Gemini questions when configured, otherwise the question bank chosen for those skills. Difficulty can swap the next prompt after a thin or strong answer.
-- **AI avatar interview** — a separate room at `/avatar`. Arun Mehta (technical) and Leela Kapoor (HR) are illustrated. The browser speaks the question and, when allowed, transcribes the microphone. Mute, replay, pause, resume, and end are in the room. An optional camera is a real self-view, video only. There is no third-party video avatar and no phoneme lip-sync: the mouth is a CSS animation while speech synthesis is speaking. Gemini writes the next question and can score an answer only when the server coach is already configured. Otherwise the local interviewer and Local Coach run, and the screen says so. A paid streaming avatar (Simli, HeyGen, or D-ID) is not connected; those services bill per minute and would need their own key behind `src/lib/avatar/provider.ts`.
-- **Voice** — browser speech synthesis and speech recognition on the question-bank round, with a typed answer when either is missing or permission is denied. This is not the avatar room.
-- **Roadmap** — daily, weekly, and skill tasks from saved scores. Checks stay in this browser.
-- **Mentor** — one next action from the saved profile and rounds. Gemini when configured, otherwise a local reply.
-- **Coding arena** — original problems, visible sample cases, JavaScript in a browser worker. Other languages are saved and not run. The server does not execute solutions.
-- **Job match** — paste a description and type skills. No resume upload.
-- **Memory** — view or clear rounds, profile, roadmap checks, and learning notes separately.
-- **Progress** — mixed overall, plus model-coach and Local Coach counts kept apart.
-- **Project builder** — four starter stacks, Gemini source when configured, local template fallback, validation, and ZIP download.
+| Storage Key | Purpose |
+|---|---|
+| `interviewverse.v1` | Interview rounds and session history |
+| `interviewverse.career.v1` | Learning data and career-related information |
 
-Topics: data structures, system design, frontend, backend, behavioral, leadership, conflict, career story.
+Neither store holds an API key.
 
-Learning data uses `interviewverse.career.v1`. Interview rounds stay in `interviewverse.v1`. Neither store holds an API key.
+History is stored locally in the browser and is not automatically synchronized across devices.
+
+---
+
+## Current Limitations
+
+- Single-user application; no account or authentication system.
+- Interview history is browser-local.
+- Voice features depend on browser support and microphone permissions.
+- AI features require a valid provider configuration.
+- AI avatar interviews use illustrated avatars, not third-party real-time video avatars.
+- Coding Arena executes JavaScript only.
+- Job Match does not include resume upload.
+- Generated project code is validated but not installed or executed on the server.
+
+---
+
+## Project Status
+
+InterviewVerse AI is developed as a **Project Scaffolding-based application**, with modular features, reusable components, separate interview logic, server-side AI integration, and local fallback functionality.
+
+The application is designed to support interview practice, performance tracking, and structured technical and HR preparation in one browser-based studio.
+
+---
+
+**Repository:** [Aayushi-Agarwal123/InterviewVerseAI](https://github.com/Aayushi-Agarwal123/InterviewVerseAI)
