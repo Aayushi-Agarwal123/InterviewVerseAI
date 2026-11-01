@@ -66,7 +66,7 @@ function emit(next: CoachModeSnapshot) {
 
 async function load() {
   try {
-    const response = await fetch("/api/coach", { cache: "no-store" });
+    const response = await fetch("/api/coach", { cache: "no-store", signal: AbortSignal.timeout(4000) });
     if (!response.ok) throw new Error("status");
     const body = (await response.json()) as {
       mode?: unknown;

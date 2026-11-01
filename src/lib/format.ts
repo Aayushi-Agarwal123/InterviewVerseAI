@@ -41,9 +41,11 @@ function shiftDay(key: string, delta: number): string {
   return `${utc.getUTCFullYear()}-${nextMonth}-${nextDay}`;
 }
 
-export function currentStreak(dates: string[], now = new Date()): number {
+export function currentStreak(dates: string[], now?: Date): number {
+  if (dates.length === 0) return 0;
+  const clock = now ?? new Date();
   const days = new Set(dates.map((iso) => practiceDay(iso)));
-  let key = practiceDay(now.toISOString());
+  let key = practiceDay(clock.toISOString());
   if (!days.has(key)) key = shiftDay(key, -1);
   if (!days.has(key)) return 0;
   let streak = 0;

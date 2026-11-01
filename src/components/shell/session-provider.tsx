@@ -25,9 +25,10 @@ type Snapshot = {
   message?: string;
 };
 
-const SERVER_SNAPSHOT: Snapshot = { status: "loading", sessions: [] };
+const SERVER_SNAPSHOT: Snapshot = { status: "ready", sessions: [] };
 
 let snapshot: Snapshot = SERVER_SNAPSHOT;
+let browserRead = false;
 const listeners = new Set<() => void>();
 
 function emit(next: Snapshot) {
@@ -36,27 +37,36 @@ function emit(next: Snapshot) {
 }
 
 function readBrowser(): Snapshot {
-  const loaded = loadStore();
-  if (!loaded.ok) {
-    return { status: "error", sessions: [], message: loaded.message };
+  try {
+    const loaded = loadStore();
+    if (!loaded.ok) {
+      return { status: "error", sessions: [], message: loaded.message };
+    }
+    rememberAll(loaded.sessions);
+    return { status: "ready", sessions: loaded.sessions };
+  } catch {
+    return {
+      status: "error",
+      sessions: [],
+      message: "Saved rounds on this browser could not be read.",
+    };
   }
-  rememberAll(loaded.sessions);
-  return { status: "ready", sessions: loaded.sessions };
+}
+
+function ensureBrowser(): Snapshot {
+  if (browserRead || typeof window === "undefined") return snapshot;
+  browserRead = true;
+  snapshot = readBrowser();
+  return snapshot;
 }
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  if (typeof window !== "undefined" && snapshot.status === "loading") {
-    queueMicrotask(() => {
-      if (snapshot.status !== "loading") return;
-      emit(readBrowser());
-    });
-  }
   return () => listeners.delete(listener);
 }
 
 function getSnapshot(): Snapshot {
-  return snapshot;
+  return ensureBrowser();
 }
 
 function getServerSnapshot(): Snapshot {

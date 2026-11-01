@@ -16,15 +16,17 @@ import {
 } from "@/components/ui/dialog";
 import { performanceSnapshot } from "@/lib/career/analytics";
 import { buildRoadmap } from "@/lib/career/roadmap";
+import { useClientNow } from "@/lib/client-clock";
 
 export function MemoryPage() {
   const store = useSessions();
   const career = useCareer();
+  const now = useClientNow();
   const [confirm, setConfirm] = useState<"rounds" | "learning" | "roadmap" | null>(null);
   if (store.status === "loading" || !career.ready) return <div className="h-40 animate-pulse rounded-2xl bg-muted" aria-hidden />;
   if (store.status === "error") return <StorageError message={store.message} onReset={store.clear} />;
   const snapshot = performanceSnapshot(store.sessions);
-  const tasks = buildRoadmap(store.sessions, career.data.profile, career.data.manualTasks);
+  const tasks = buildRoadmap(store.sessions, career.data.profile, career.data.manualTasks, now);
   const profile = career.data.profile;
   return (
     <div className="flex max-w-3xl flex-col gap-8">

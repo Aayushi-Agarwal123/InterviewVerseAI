@@ -32,8 +32,9 @@ export function buildRoadmap(
   sessions: Session[],
   profile: CandidateProfile | null,
   manualDone: string[],
-  now = new Date().toISOString(),
+  now?: string,
 ): RoadmapTask[] {
+  const clock = now ?? new Date().toISOString();
   const completed = sessions.filter((session) => session.status === "completed" && session.report && !session.sample);
   const dimensionScores = new Map<Dimension, number[]>();
   const topicScores = new Map<Topic, number[]>();
@@ -52,8 +53,8 @@ export function buildRoadmap(
   const weakestTopic =
     [...topicScores.entries()].sort((a, b) => average(a[1]) - average(b[1]))[0]?.[0] ??
     (profile?.interviewType === "hr" ? "behavioral" : "backend");
-  const today = dayKey(now);
-  const week = weekKey(now);
+  const today = dayKey(clock);
+  const week = weekKey(clock);
   const todayDone = completed.some(
     (session) => dayKey(session.updatedAt) === today && session.config.topic === weakestTopic,
   );

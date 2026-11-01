@@ -15,8 +15,9 @@ const EMPTY = emptyCareer();
 
 type Snap = { ready: boolean; data: CareerData };
 
-const SERVER_SNAP: Snap = { ready: false, data: EMPTY };
+const SERVER_SNAP: Snap = { ready: true, data: EMPTY };
 let snapshot: Snap = SERVER_SNAP;
+let browserRead = false;
 const listeners = new Set<() => void>();
 
 function emit(next: Snap) {
@@ -24,19 +25,28 @@ function emit(next: Snap) {
   for (const listener of listeners) listener();
 }
 
+function readBrowser(): Snap {
+  try {
+    return { ready: true, data: loadCareer() };
+  } catch {
+    return SERVER_SNAP;
+  }
+}
+
+function ensureBrowser(): Snap {
+  if (browserRead || typeof window === "undefined") return snapshot;
+  browserRead = true;
+  snapshot = readBrowser();
+  return snapshot;
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  if (typeof window !== "undefined" && !snapshot.ready) {
-    queueMicrotask(() => {
-      if (snapshot.ready) return;
-      emit({ ready: true, data: loadCareer() });
-    });
-  }
   return () => listeners.delete(listener);
 }
 
 function getSnapshot(): Snap {
-  return snapshot;
+  return ensureBrowser();
 }
 
 function getServerSnapshot(): Snap {

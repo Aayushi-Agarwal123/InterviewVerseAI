@@ -7,15 +7,17 @@ import { useSessions } from "@/components/shell/session-provider";
 import { StorageError } from "@/components/storage-error";
 import { Button } from "@/components/ui/button";
 import { buildRoadmap } from "@/lib/career/roadmap";
+import { useClientNow } from "@/lib/client-clock";
 
 export function RoadmapPage() {
   const store = useSessions();
   const career = useCareer();
+  const now = useClientNow();
   if (store.status === "loading" || !career.ready) {
     return <div className="h-40 animate-pulse rounded-2xl bg-muted" aria-hidden />;
   }
   if (store.status === "error") return <StorageError message={store.message} onReset={store.clear} />;
-  const tasks = buildRoadmap(store.sessions, career.data.profile, career.data.manualTasks);
+  const tasks = buildRoadmap(store.sessions, career.data.profile, career.data.manualTasks, now);
   const done = tasks.filter((task) => task.done).length;
   return (
     <div className="flex flex-col gap-8">
