@@ -28,11 +28,14 @@ function errorReason(details: unknown): string {
   return "";
 }
 
-function providerDetail(status: string, message: string): string | null {
-  return sanitizeProviderDetail([status, message].filter(Boolean).join(": "));
+function providerDetail(status: string, message: string, apiKey: string): string | null {
+  return sanitizeProviderDetail([status, message].filter(Boolean).join(": "), apiKey);
 }
 
-async function classifyFailure(response: Response): Promise<{ failure: ModelFailure; detail: string | null }> {
+async function classifyFailure(
+  response: Response,
+  apiKey: string,
+): Promise<{ failure: ModelFailure; detail: string | null }> {
   let status = "";
   let message = "";
   let reason = "";
@@ -44,7 +47,7 @@ async function classifyFailure(response: Response): Promise<{ failure: ModelFail
   } catch {
     await response.body?.cancel().catch(() => undefined);
   }
-  const detail = providerDetail(status, message);
+  const detail = providerDetail(status, message, apiKey);
   const quota = /quota/i.test(message);
   if (response.status === 429 || status === "RESOURCE_EXHAUSTED") {
     return { failure: quota ? "quota" : "rate-limit", detail };
@@ -119,10 +122,11 @@ export async function completeGemini(
     },
   );
   if (!response.ok) {
-    const classified = await classifyFailure(response);
+    const classified = await classifyFailure(response, request.apiKey);
     throw new ModelCallError(classified.failure, "gemini", {
       httpStatus: response.status,
       detail: classified.detail,
+      apiKey: request.apiKey,
     });
   }
   let payload: unknown;
@@ -133,6 +137,7 @@ export async function completeGemini(
     throw new ModelCallError("unavailable", "gemini", {
       httpStatus: response.status,
       detail: "unreadable-body",
+      apiKey: request.apiKey,
     });
   }
   const text = readGeminiText(payload);
@@ -140,6 +145,7 @@ export async function completeGemini(
     throw new ModelCallError("unavailable", "gemini", {
       httpStatus: response.status,
       detail: "empty-candidate",
+      apiKey: request.apiKey,
     });
   }
   return text;

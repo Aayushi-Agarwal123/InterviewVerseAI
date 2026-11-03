@@ -4,6 +4,7 @@ import { DIMENSION_COPY, topicById } from "@/lib/catalog";
 import type { Session } from "@/lib/domain";
 import type { CandidateProfile } from "@/lib/career/profile";
 import { performanceSnapshot } from "@/lib/career/analytics";
+import { redactSensitiveText } from "@/lib/security/redact";
 
 export type MentorBrief = {
   name: string;
@@ -91,7 +92,7 @@ function readReply(text: string): string | null {
     if (typeof parsed.reply !== "string") return null;
     const reply = parsed.reply.replace(/\s+/g, " ").trim();
     if (reply.length < 40 || reply.length > 1200) return null;
-    return reply.replace(/AIza[0-9A-Za-z\-_]{10,}/g, "[redacted]").replace(/sk-[A-Za-z0-9]{10,}/g, "[redacted]");
+    return redactSensitiveText(reply);
   } catch {
     return null;
   }

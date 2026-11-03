@@ -1,4 +1,5 @@
 import type { ProjectFile } from "@/lib/builder/types";
+import { redactSensitiveText } from "@/lib/security/redact";
 
 export const LIMITS = {
   description: 4_000,
@@ -33,10 +34,7 @@ export function safeRelativePath(input: string): string | null {
 }
 
 export function redactSecrets(text: string, apiKey: string | null = null): string {
-  let next = text
-    .replace(/AIza[0-9A-Za-z\-_]{20,}/g, "[redacted]")
-    .replace(/sk-[A-Za-z0-9_\-]{12,}/g, "[redacted]")
-    .replace(/AKIA[0-9A-Z]{16}/g, "[redacted]");
+  let next = redactSensitiveText(text);
   if (apiKey && apiKey.length >= 8) next = next.split(apiKey).join("[redacted]");
   return next;
 }

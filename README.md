@@ -4,7 +4,7 @@
 
 Practice a technical round, an HR conversation, a profile-based interview, a spoken round, or an AI avatar interview. Get a score across five dimensions and compare your performance with previous sessions.
 
-InterviewVerse AI is a single-user, browser-based studio. You choose an interviewer, answer in writing or by voice, and receive a debrief covering:
+InterviewVerse AI is an open, browser-based studio. Anyone can practice without an account. You choose an interviewer, answer in writing or by voice, and receive a debrief covering:
 
 - Relevance
 - Structure
@@ -12,7 +12,7 @@ InterviewVerse AI is a single-user, browser-based studio. You choose an intervie
 - Depth
 - Communication
 
-Your interview history and learning data stay in this browser. No account or registration is required.
+Your interview history and learning data stay in this browser. They are not uploaded to an account, and they are not shared with the next visitor on the same site.
 
 The coach can call Google Gemini or an OpenAI-compatible model. One server-side configuration is shared by `/api/coach`, `/api/career`, and `/api/builder`. With no usable API key, those routes stay on the local rubric, the local question bank, or local project templates. The key stays in server environment variables and is never sent to the browser. Gemini mode sends the relevant request to Google's API. Nothing in this app turns on paid billing.
 
@@ -121,6 +121,9 @@ INTERVIEWVERSE_COACH_BASE_URL=
 | `INTERVIEWVERSE_COACH_PROVIDER` | No | `gemini`, `openai`, or `local`. An empty value with a usable key still selects OpenAI. |
 | `INTERVIEWVERSE_COACH_MODEL` | For Gemini | A real Gemini model ID from your project. OpenAI defaults to `gpt-4o-mini` when this is empty. Gemini has no default model. |
 | `INTERVIEWVERSE_COACH_BASE_URL` | No | Empty uses the provider default: Gemini `https://generativelanguage.googleapis.com/v1beta`, OpenAI `https://api.openai.com/v1`. |
+| `UPSTASH_REDIS_REST_URL` | Production AI | Upstash Redis REST URL. Empty in local development. Missing in production turns AI requests off. |
+| `UPSTASH_REDIS_REST_TOKEN` | Production AI | Upstash Redis REST token. Server-only. Never put it in client code. |
+| `INTERVIEWVERSE_TRUSTED_IP_HEADER` | No | One trusted proxy header used to separate visitors. Empty shares one limit. |
 
 Gemini uses the Developer API `generateContent` request, not the OpenAI chat format. The key is sent as `x-goog-api-key` and is not put in the URL. This app does not require the key to start with a particular prefix.
 
@@ -142,6 +145,25 @@ The sidebar says **Gemini AI Coach** or **Local Coach**, and it says when answer
 Nothing in the application enables paid billing.
 
 OpenAI remains available. Set `INTERVIEWVERSE_COACH_PROVIDER=openai` and a model such as `gpt-4o-mini`.
+
+### Public access and rate limits
+
+Visitors do not sign in. Ordinary pages are not rate-limited. `POST /api/coach`, `POST /api/career`, and `POST /api/builder` are, because those requests can call Gemini.
+
+Limits are counted per visitor address:
+
+| Route | Limit |
+| --- | --- |
+| `POST /api/coach` | 12 requests every 10 minutes |
+| `POST /api/career` | 12 requests every 10 minutes |
+| `POST /api/builder` | 10 requests every 10 minutes |
+| Project generation inside `POST /api/builder` | 4 requests every 60 minutes, in addition to the builder limit |
+
+A visitor who passes a limit receives HTTP 429 and a `Retry-After` value. The response does not describe the rate-limit service.
+
+Production uses Upstash Redis REST (`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`). If either value is missing, still a placeholder, the service cannot be reached, or the check does not finish within 2 seconds, production refuses AI requests with HTTP 503. It does not fall through to unlimited Gemini calls. Local `npm run dev` keeps AI available when those two values are empty, so this machine can be used without Upstash.
+
+On Vercel Production and Preview, set `INTERVIEWVERSE_TRUSTED_IP_HEADER` to `x-vercel-forwarded-for`. Any other value, including `cf-connecting-ip`, turns AI requests off with HTTP 503. Elsewhere, the allowed names are `cf-connecting-ip`, `x-vercel-forwarded-for`, `x-real-ip`, and `x-forwarded-for`. Any other header is ignored and every visitor shares one limit. A missing or invalid address also shares that limit. Only enable a header when the application origin cannot be reached except through that host.
 
 ---
 
@@ -203,6 +225,15 @@ Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
 ### 4. Optional: Configure AI Mode
 
 Follow the environment-variable instructions above. Leave the key empty, or set the provider to `local`, to use the local rubric and local templates.
+
+### 5. Production
+
+```bash
+npm run build
+npm start
+```
+
+`npm start` listens on `PORT` when the host sets it, and on port 3000 otherwise. Local development stays on port 43123. Set the Upstash variables before starting production, or AI requests stay unavailable while the pages continue to load.
 
 ---
 
@@ -301,7 +332,8 @@ Neither store holds an API key. History stays in this browser and is not synchro
 
 ## Current Limitations
 
-- Single-user application, with no account or authentication.
+- No accounts. Each visitor's interview history stays in that browser.
+- AI requests are rate-limited. Pages themselves are not.
 - Interview history is browser-local.
 - Voice features depend on browser support and microphone permission.
 - AI features require a usable provider configuration. Placeholder values stay on local mode.

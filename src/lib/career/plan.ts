@@ -5,6 +5,7 @@ import { createSession } from "@/lib/engine/session";
 import { QUESTIONS } from "@/lib/questions";
 import { questionBudget, type CandidateProfile } from "@/lib/career/profile";
 import { sealCustomQuestions } from "@/lib/career/custom";
+import { redactSensitiveText } from "@/lib/security/redact";
 
 export type InterviewPlan = {
   source: "gemini" | "bank";
@@ -30,7 +31,7 @@ const TOPIC_WORDS: { topic: Topic; words: string[] }[] = [
 ];
 
 function scrub(text: string): string {
-  return text.replace(/AIza[0-9A-Za-z\-_]{10,}/g, "[redacted]").replace(/sk-[A-Za-z0-9]{10,}/g, "[redacted]");
+  return redactSensitiveText(text);
 }
 
 function wantedTopics(profile: CandidateProfile): Topic[] {

@@ -6,6 +6,9 @@ import { planInterview } from "@/lib/career/plan";
 import { nextAvatarQuestion, type AvatarExchange } from "@/lib/avatar/engine";
 import type { AvatarInterviewer } from "@/lib/avatar/provider";
 import type { Session } from "@/lib/domain";
+import { enforceAiLimit } from "@/lib/security/ai-limit";
+import { readBoundedBody } from "@/lib/security/body";
+import { refuseAiPost } from "@/lib/security/request";
 
 const MAX_BODY_BYTES = 64_000;
 
@@ -20,21 +23,18 @@ function respond(body: unknown, status: number, apiKey: string | null): Response
   });
 }
 
-async function readBody(request: Request): Promise<string | null> {
-  const header = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(header) && header > MAX_BODY_BYTES) return null;
-  const text = await request.text();
-  return new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES ? null : text;
-}
-
 function isSessionList(value: unknown): value is Session[] {
   return Array.isArray(value) && value.length <= 40;
 }
 
 export async function POST(request: Request) {
+  const refused = refuseAiPost(request);
+  if (refused) return refused;
   await connection();
+  const limited = await enforceAiLimit(request, "career");
+  if (limited) return limited;
   const config = readCoachConfig(process.env);
-  const text = await readBody(request);
+  const text = await readBoundedBody(request, MAX_BODY_BYTES);
   if (text === null) return respond({ error: "That request is too large." }, 413, config.apiKey);
   let body: unknown;
   try {

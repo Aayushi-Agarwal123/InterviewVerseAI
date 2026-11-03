@@ -21,7 +21,7 @@ const GEMINI_NOTICES = {
   quota: "Gemini's free quota is exhausted. This starter was built from the local template.",
   "rate-limit": "Gemini rate-limited this request. This starter was built from the local template.",
   "invalid-key":
-    "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY to the value that starts with AIza. This starter was built from the local template.",
+    "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY on the server. This starter was built from the local template.",
   "restricted-key":
     "This Gemini API key blocks server calls. In Google AI Studio, set application restrictions to None. This starter was built from the local template.",
   "api-disabled":

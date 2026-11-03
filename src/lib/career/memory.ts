@@ -1,4 +1,5 @@
 import type { CandidateProfile } from "@/lib/career/profile";
+import { redactSensitiveText } from "@/lib/security/redact";
 
 export const CAREER_KEY = "interviewverse.career.v1";
 
@@ -34,7 +35,7 @@ export function emptyCareer(): CareerData {
 }
 
 function scrub(text: string): string {
-  return text.replace(/AIza[0-9A-Za-z\-_]{10,}/g, "[redacted]").replace(/sk-[A-Za-z0-9]{10,}/g, "[redacted]");
+  return redactSensitiveText(text);
 }
 
 export function parseCareer(raw: string): CareerData | null {

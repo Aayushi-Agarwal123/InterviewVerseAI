@@ -31,7 +31,13 @@ import { LIMITS, safeRelativePath } from "../src/lib/builder/paths";
 import { parseBuildRequest, resolveStack } from "../src/lib/builder/request";
 import { zipProject } from "../src/lib/builder/zip";
 import { publicCoachStatus, readCoachConfig } from "../src/lib/coach/config";
-import { ModelCallError } from "../src/lib/coach/errors";
+import { ModelCallError, sanitizeProviderDetail } from "../src/lib/coach/errors";
+import { AI_LIMIT_DEADLINE_MS, AI_LIMITS, REDIS_RETRY, clientAddress, enforceAiLimit } from "../src/lib/security/ai-limit";
+import { readBoundedBody } from "../src/lib/security/body";
+import { refuseAiPost } from "../src/lib/security/request";
+import { POST as coachPost } from "../src/app/api/coach/route";
+import { POST as careerPost } from "../src/app/api/career/route";
+import { POST as builderPost } from "../src/app/api/builder/route";
 import { evaluateAnswer, writeDebrief } from "../src/lib/coach/evaluate";
 import { completeGemini } from "../src/lib/coach/gemini";
 import { coachCopy } from "../src/lib/coach/status";
@@ -802,6 +808,7 @@ assert(invalidEval.calls.length === 1, "invalid evaluation is not retried");
 assert(invalidEval.result.verdict.source === "local", "invalid key uses the local coach");
 assert(invalidEval.result.notice?.includes("rejected") && invalidEval.result.notice.includes("kept"), "invalid key notice");
 assert(invalidEval.result.notice?.includes("Google AI Studio"), "invalid key notice names AI Studio");
+assert(!invalidEval.result.notice?.includes("starts with AIza"), "invalid key notice does not require a key prefix");
 
 const geminiFailures = [
   {
@@ -2115,6 +2122,220 @@ if (avatarParsed.ok) {
   const openFollowUp = answerAvatar(followed, "", "2026-04-04T10:05:00.000Z", undefined, null, 3, true);
   assert(openFollowUp.status === "completed" && openFollowUp.turns.length === 1 && !openFollowUp.turns[0]?.followUpAnswer, "ending during a follow-up keeps the first answer");
 }
+
+const scrubbed = sanitizeProviderDetail(
+  "INVALID_ARGUMENT: AQ.AbcdEFGH1234567890abcd sk-test-secret-value Bearer supersecrettoken api_key=supersecretvalue https://example.test/path",
+);
+assert(scrubbed !== null, "provider detail keeps a safe summary");
+assert(scrubbed?.includes("[redacted]") && scrubbed.includes("[url]"), "provider detail marks secrets and urls");
+assert(!scrubbed?.includes("AbcdEFGH") && !scrubbed?.includes("sk-test") && !scrubbed?.includes("supersecret"), "provider detail removes secret material");
+
+const spoofed = new Request("https://interviewverse.local/api/coach", {
+  headers: { "x-forwarded-for": "1.2.3.4", "cf-connecting-ip": "9.9.9.9", "x-client-ip": "8.8.8.8" },
+});
+assert(clientAddress(spoofed, {}) === "shared", "untrusted client headers do not choose the limit");
+assert(clientAddress(spoofed, { INTERVIEWVERSE_TRUSTED_IP_HEADER: "x-client-ip" }) === "shared", "unknown header names are ignored");
+assert(clientAddress(spoofed, { INTERVIEWVERSE_TRUSTED_IP_HEADER: "cf-connecting-ip" }) === "9.9.9.9", "cloudflare header is used only when selected");
+assert(clientAddress(spoofed, { INTERVIEWVERSE_TRUSTED_IP_HEADER: "x-forwarded-for" }) === "1.2.3.4", "forwarded header uses the first valid address");
+assert(clientAddress(new Request("https://interviewverse.local/api/coach", { headers: { "x-forwarded-for": "nope, 10.0.0.8" } }), { INTERVIEWVERSE_TRUSTED_IP_HEADER: "x-forwarded-for" }) === "shared", "a bad forwarded address does not become the client");
+
+const productionDenied = await enforceAiLimit(spoofed, "coach", { env: { NODE_ENV: "production" } });
+assert(productionDenied?.status === 503, "production without the rate-limit service refuses AI requests");
+const productionBody = await productionDenied?.json();
+assert(productionBody?.error === "AI requests are temporarily unavailable.", "production refusal stays generic");
+assert(!JSON.stringify(productionBody).toLowerCase().includes("upstash"), "production refusal does not name the limiter");
+const developmentOpen = await enforceAiLimit(spoofed, "coach", { env: { NODE_ENV: "development" } });
+assert(developmentOpen === null, "local development without the rate-limit service still allows AI requests");
+
+let coachChecks = 0;
+const coachProbe = {
+  limit: async (key: string) => {
+    assert(key === "shared", "the probe sees the resolved client key");
+    coachChecks += 1;
+    return { success: coachChecks <= 2, reset: Date.now() + 60_000 };
+  },
+};
+assert((await enforceAiLimit(spoofed, "coach", { probes: { coach: coachProbe } })) === null, "first coach request is allowed");
+assert((await enforceAiLimit(spoofed, "coach", { probes: { coach: coachProbe } })) === null, "second coach request is allowed");
+const blocked = await enforceAiLimit(spoofed, "coach", { probes: { coach: coachProbe } });
+assert(blocked?.status === 429, "a later coach request is rate-limited");
+const retryAfter = Number(blocked?.headers.get("retry-after"));
+assert(retryAfter >= 55 && retryAfter <= 60, "rate limit includes retry-after");
+const blockedBody = await blocked?.json();
+assert(blockedBody?.error === "Too many AI requests from this network. Wait and try again.", "rate limit error is safe");
+assert(!JSON.stringify(blockedBody).includes("1.2.3.4") && !JSON.stringify(blockedBody).toLowerCase().includes("redis"), "rate limit error hides the client and storage");
+
+const broken = await enforceAiLimit(spoofed, "career", {
+  env: { NODE_ENV: "production", UPSTASH_REDIS_REST_URL: "https://example.test", UPSTASH_REDIS_REST_TOKEN: "stored-token-value" },
+  probes: { career: { limit: async () => { throw new Error("stored-token-value"); } } },
+});
+assert(broken?.status === 503, "a failed limiter refuses the request");
+assert(!(await broken?.text())?.includes("stored-token-value"), "limiter failures do not echo credentials");
+
+const generateProbe = { limit: async () => ({ success: false, reset: Date.now() + 60_000 }) };
+const generatedBlock = await enforceAiLimit(spoofed, "builder-generate", { probes: { "builder-generate": generateProbe } });
+assert(generatedBlock?.status === 429, "project generation has its own limit");
+assert(
+  AI_LIMITS.coach.requests === 12 &&
+    AI_LIMITS.career.requests === 12 &&
+    AI_LIMITS.builder.requests === 10 &&
+    AI_LIMITS["builder-generate"].requests === 4 &&
+    AI_LIMITS.coach.window === "10 m" &&
+    AI_LIMITS["builder-generate"].window === "60 m",
+  "published limits stay stable",
+);
+assert(AI_LIMIT_DEADLINE_MS === 2_000 && REDIS_RETRY.retries === 1 && REDIS_RETRY.backoffMs === 50, "redis deadline and retry stay small");
+
+const timedOut = await enforceAiLimit(spoofed, "coach", {
+  probes: { coach: { limit: async () => ({ success: true, reset: 0, reason: "timeout" }) } },
+});
+assert(timedOut?.status === 503, "a limiter timeout is not permission");
+assert((await timedOut?.json())?.error === "AI requests are temporarily unavailable.", "a limiter timeout stays generic");
+
+let geminiAfterStall = 0;
+const stallStarted = Date.now();
+const stalled = await enforceAiLimit(spoofed, "builder", {
+  env: { NODE_ENV: "production", UPSTASH_REDIS_REST_URL: "https://example.test", UPSTASH_REDIS_REST_TOKEN: "stored-token-value" },
+  probes: { builder: { limit: () => new Promise(() => undefined) } },
+});
+if (!stalled) geminiAfterStall += 1;
+assert(stalled?.status === 503, "a stalled limiter returns 503");
+assert(geminiAfterStall === 0, "a stalled limiter does not reach Gemini");
+const stallElapsed = Date.now() - stallStarted;
+assert(stallElapsed >= AI_LIMIT_DEADLINE_MS - 100 && stallElapsed < AI_LIMIT_DEADLINE_MS + 1_500, "a stalled limiter stops at the short deadline");
+
+const vercelSpoof = new Request("https://interviewverse.local/api/coach", {
+  headers: { "cf-connecting-ip": "9.9.9.9", "x-forwarded-for": "1.2.3.4", "x-vercel-forwarded-for": "203.0.113.10" },
+});
+let unsafeProbeCalled = false;
+const unsafeHeader = await enforceAiLimit(vercelSpoof, "coach", {
+  env: { NODE_ENV: "production", VERCEL_ENV: "production", INTERVIEWVERSE_TRUSTED_IP_HEADER: "cf-connecting-ip" },
+  probes: {
+    coach: {
+      limit: async () => {
+        unsafeProbeCalled = true;
+        return { success: true, reset: 0 };
+      },
+    },
+  },
+});
+assert(unsafeHeader?.status === 503 && !unsafeProbeCalled, "production rejects an unsafe trusted-IP-header configuration");
+assert(
+  clientAddress(vercelSpoof, { VERCEL_ENV: "production", INTERVIEWVERSE_TRUSTED_IP_HEADER: "cf-connecting-ip" }) === "shared",
+  "a rejected vercel header does not become the client key",
+);
+const previewRejected = await enforceAiLimit(vercelSpoof, "career", {
+  env: { NODE_ENV: "production", VERCEL_ENV: "preview", INTERVIEWVERSE_TRUSTED_IP_HEADER: "x-forwarded-for" },
+});
+assert(previewRejected?.status === 503, "preview requires the vercel client header");
+let vercelKey = "";
+const vercelAllowed = await enforceAiLimit(vercelSpoof, "coach", {
+  env: { VERCEL_ENV: "production", INTERVIEWVERSE_TRUSTED_IP_HEADER: "x-vercel-forwarded-for" },
+  probes: {
+    coach: {
+      limit: async (key: string) => {
+        vercelKey = key;
+        return { success: true, reset: 0 };
+      },
+    },
+  },
+});
+assert(vercelAllowed === null && vercelKey === "203.0.113.10", "vercel production keeps the forwarded client address");
+const invalidVercel = await enforceAiLimit(
+  new Request("https://interviewverse.local/api/coach", { headers: { "x-vercel-forwarded-for": "not-an-ip" } }),
+  "coach",
+  {
+    env: { VERCEL_ENV: "preview", INTERVIEWVERSE_TRUSTED_IP_HEADER: "x-vercel-forwarded-for" },
+    probes: { coach: { limit: async (key: string) => ({ success: key === "shared", reset: 0 }) } },
+  },
+);
+assert(invalidVercel === null, "an invalid vercel address stays in the shared bucket");
+
+const unusualKey = "custom-provider-key-99ff00aa11";
+const unusualDetail = sanitizeProviderDetail(`provider said ${unusualKey} in the body`, unusualKey);
+assert(unusualDetail !== null && !unusualDetail.includes(unusualKey) && unusualDetail.includes("[redacted]"), "an unusual configured key is removed");
+assert(sanitizeProviderDetail("abnormal abort", "ab")?.includes("abnormal"), "a short configured key is left untouched");
+assert(sanitizeProviderDetail("plain failure", null) === "plain failure", "a missing configured key still sanitizes");
+const loggedFailure = new ModelCallError("invalid-key", "gemini", {
+  httpStatus: 400,
+  detail: `bad ${unusualKey}`,
+  apiKey: unusualKey,
+});
+assert(loggedFailure.detail !== null && !loggedFailure.detail.includes(unusualKey), "model errors store the redacted detail");
+assert(!JSON.stringify(loggedFailure).includes(unusualKey), "model errors do not keep the configured key");
+const unusualConfig = readCoachConfig({
+  INTERVIEWVERSE_COACH_PROVIDER: "gemini",
+  INTERVIEWVERSE_COACH_API_KEY: unusualKey,
+  INTERVIEWVERSE_COACH_MODEL: "gemini-2.5-flash",
+});
+const providerLogs: string[] = [];
+const originalConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  providerLogs.push(args.map((item) => String(item)).join(" "));
+};
+try {
+  const fallen = await evaluateAnswer(twoSum, weakInput, unusualConfig, async () => {
+    throw new Error(`socket closed ${unusualKey}`);
+  });
+  assert(fallen.mode === "local" && fallen.fellBack, "a provider failure falls back locally");
+} finally {
+  console.error = originalConsoleError;
+}
+assert(providerLogs.length === 1 && !providerLogs[0]?.includes(unusualKey), "provider logs remove the configured key");
+assert(providerLogs[0]?.includes("[redacted]"), "provider logs mark the removed key");
+
+function aiPost(path: string, headers: Record<string, string>, body = "{\"action\":\"evaluate\"}") {
+  return new Request(`https://interviewverse.local${path}`, { method: "POST", headers, body });
+}
+const crossSite = aiPost("/api/coach", { "content-type": "application/json", "sec-fetch-site": "cross-site" });
+const crossCoach = await coachPost(crossSite);
+assert(crossCoach.status === 403, "cross-site coach requests are refused");
+assert((await crossCoach.json())?.error === "This request was refused.", "cross-site refusal stays generic");
+assert((await careerPost(aiPost("/api/career", { "content-type": "application/json", "sec-fetch-site": " Cross-Site " }))).status === 403, "cross-site career requests are refused");
+assert((await builderPost(aiPost("/api/builder", { "content-type": "application/json", "sec-fetch-site": "cross-site" }))).status === 403, "cross-site builder requests are refused");
+const textBody = await coachPost(aiPost("/api/coach", { "content-type": "text/plain", "sec-fetch-site": "same-origin" }, "hello"));
+assert(textBody.status === 415, "coach rejects a non-json content type");
+assert((await careerPost(aiPost("/api/career", { "sec-fetch-site": "same-origin" }))).status === 415, "career rejects a missing content type");
+assert((await builderPost(aiPost("/api/builder", { "content-type": "application/x-www-form-urlencoded", "sec-fetch-site": "same-site" }))).status === 415, "builder rejects a form body");
+const sameOrigin = aiPost("/api/coach", { "content-type": "application/json; charset=utf-8", "sec-fetch-site": "same-origin" });
+assert(refuseAiPost(sameOrigin) === null, "same-origin json passes the request gate");
+assert(refuseAiPost(aiPost("/api/career", { "content-type": "application/json" })) === null, "a missing fetch-site header stays allowed");
+let reachedHandler = false;
+try {
+  await coachPost(sameOrigin);
+} catch (error) {
+  reachedHandler = error instanceof Error && error.message.includes("connection");
+}
+assert(reachedHandler, "same-origin requests continue into the handler");
+
+const oversizedCareer = new Request("https://interviewverse.local/api/career", {
+  method: "POST",
+  body: "x".repeat(70_000),
+});
+assert(await readBoundedBody(oversizedCareer, 64_000) === null, "career rejects an oversized body");
+const shortMalformedBody = new Request("https://interviewverse.local/api/coach", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: "{",
+});
+assert((await readBoundedBody(shortMalformedBody, 320_000)) === "{", "a small malformed body is still readable after the limit");
+
+const rejectedBuild = await generateProject(
+  {
+    name: "Interview Prep",
+    slug: "interview-prep",
+    description: "A small practice tracker for interview notes.",
+    extras: "",
+    frontend: "react-vite",
+    backend: "none",
+    database: "none",
+    stack: "react-vite",
+  },
+  geminiConfig,
+  async () => geminiResponse(400, { error: { status: "INVALID_ARGUMENT", message: "API key not valid. Please pass a valid API key." } }),
+);
+assert(rejectedBuild.mode === "local" && rejectedBuild.notice?.includes("on the server"), "builder invalid-key notice stays on the server");
+assert(!rejectedBuild.notice?.includes("starts with AIza"), "builder invalid-key notice does not require a key prefix");
 
 console.log(
   `engine ok: ${QUESTIONS.length} prompts, strong ${strong.overall}, weak ${weak.overall}, sample ${sample.report?.overall}`,

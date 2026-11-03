@@ -1,3 +1,5 @@
+import { redactSensitiveText } from "@/lib/security/redact";
+
 export type ModelFailure =
   | "rate-limit"
   | "quota"
@@ -11,13 +13,11 @@ export type ModelFailure =
 export type ModelDiagnostic = {
   httpStatus?: number | null;
   detail?: string | null;
+  apiKey?: string | null;
 };
 
-export function sanitizeProviderDetail(value: string): string | null {
-  const text = value
-    .replace(/AIza[0-9A-Za-z\-_]{8,}/g, "[redacted]")
-    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "[redacted]")
-    .replace(/(?:api[_-]?key|token|secret|authorization)=([^&\s]+)/gi, "[redacted]")
+export function sanitizeProviderDetail(value: string, apiKey?: string | null): string | null {
+  const text = redactSensitiveText(value, apiKey)
     .replace(/https?:\/\/\S+/g, "[url]")
     .replace(/\s+/g, " ")
     .trim()
@@ -37,6 +37,6 @@ export class ModelCallError extends Error {
     this.failure = failure;
     this.provider = provider;
     this.httpStatus = diagnostic?.httpStatus ?? null;
-    this.detail = diagnostic?.detail ? sanitizeProviderDetail(diagnostic.detail) : null;
+    this.detail = diagnostic?.detail ? sanitizeProviderDetail(diagnostic.detail, diagnostic.apiKey) : null;
   }
 }

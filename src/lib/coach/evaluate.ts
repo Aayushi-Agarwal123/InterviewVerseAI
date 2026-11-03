@@ -33,7 +33,7 @@ const GEMINI_NOTICES = {
     quota: "Gemini's free quota is exhausted. This answer was scored by the local coach, and your text was kept.",
     "rate-limit": "Gemini rate-limited this request. This answer was scored by the local coach, and your text was kept.",
     "invalid-key":
-      "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY to the value that starts with AIza. This answer was scored by the local coach, and your text was kept.",
+      "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY on the server. This answer was scored by the local coach, and your text was kept.",
     "restricted-key":
       "This Gemini API key blocks server calls. In Google AI Studio, set application restrictions to None. This answer was scored by the local coach, and your text was kept.",
     "api-disabled":
@@ -47,7 +47,7 @@ const GEMINI_NOTICES = {
     quota: "Gemini's free quota is exhausted. The scores and answers are saved.",
     "rate-limit": "Gemini rate-limited this request. The scores and answers are saved.",
     "invalid-key":
-      "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY to the value that starts with AIza. The scores and answers are saved.",
+      "The Gemini API key was rejected. Create a key in Google AI Studio and set INTERVIEWVERSE_COACH_API_KEY on the server. The scores and answers are saved.",
     "restricted-key":
       "This Gemini API key blocks server calls. In Google AI Studio, set application restrictions to None. The scores and answers are saved.",
     "api-disabled":
@@ -65,7 +65,7 @@ function noticeForModelError(error: unknown, kind: "answer" | "debrief"): string
   return kind === "answer" ? LOCAL_FALLBACK_NOTICE : DEBRIEF_FALLBACK_NOTICE;
 }
 
-function logProviderFallback(error: unknown) {
+function logProviderFallback(error: unknown, apiKey: string | null) {
   if (error instanceof ModelCallError) {
     console.error(
       JSON.stringify({
@@ -73,7 +73,7 @@ function logProviderFallback(error: unknown) {
         provider: error.provider,
         failure: error.failure,
         httpStatus: error.httpStatus,
-        detail: error.detail,
+        detail: error.detail ? sanitizeProviderDetail(error.detail, apiKey) : null,
       }),
     );
     return;
@@ -86,7 +86,7 @@ function logProviderFallback(error: unknown) {
       provider: null,
       failure: "unexpected",
       httpStatus: null,
-      detail: timedOut ? "timeout" : sanitizeProviderDetail(error instanceof Error ? `${name}: ${error.message}` : name),
+      detail: timedOut ? "timeout" : sanitizeProviderDetail(error instanceof Error ? `${name}: ${error.message}` : name, apiKey),
     }),
   );
 }
@@ -208,7 +208,7 @@ export async function evaluateAnswer(
     }
     return { mode: "ai", fellBack: false, verdict };
   } catch (error) {
-    logProviderFallback(error);
+    logProviderFallback(error, config.apiKey);
     return { mode: "local", fellBack: true, notice: noticeForModelError(error, "answer"), verdict: local };
   }
 }
@@ -239,7 +239,7 @@ export async function writeDebrief(
     if (!coach) return { mode: "local", fellBack: true, notice: DEBRIEF_FALLBACK_NOTICE };
     return { mode: "ai", fellBack: false, coach };
   } catch (error) {
-    logProviderFallback(error);
+    logProviderFallback(error, config.apiKey);
     return { mode: "local", fellBack: true, notice: noticeForModelError(error, "debrief") };
   }
 }

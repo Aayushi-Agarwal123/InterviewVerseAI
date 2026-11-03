@@ -9,6 +9,9 @@ import {
 } from "@/lib/coach/schema";
 import { sealCustomQuestion } from "@/lib/career/custom";
 import { getQuestion } from "@/lib/questions";
+import { enforceAiLimit } from "@/lib/security/ai-limit";
+import { readBoundedBody } from "@/lib/security/body";
+import { refuseAiPost } from "@/lib/security/request";
 
 const MAX_BODY_BYTES = 320_000;
 
@@ -23,35 +26,6 @@ function respond(body: unknown, status: number, apiKey: string | null): Response
   });
 }
 
-async function readBody(request: Request): Promise<string | null> {
-  const header = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(header) && header > MAX_BODY_BYTES) return null;
-  const reader = request.body?.getReader();
-  if (!reader) {
-    const text = await request.text();
-    return new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES ? null : text;
-  }
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > MAX_BODY_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
 export async function GET() {
   await connection();
   const config = readCoachConfig(process.env);
@@ -59,9 +33,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const refused = refuseAiPost(request);
+  if (refused) return refused;
   await connection();
+  const limited = await enforceAiLimit(request, "coach");
+  if (limited) return limited;
   const config = readCoachConfig(process.env);
-  const text = await readBody(request);
+  const text = await readBoundedBody(request, MAX_BODY_BYTES);
   if (text === null) {
     return respond({ error: "That round is too large to score." }, 413, config.apiKey);
   }

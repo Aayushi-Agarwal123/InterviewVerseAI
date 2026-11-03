@@ -4,6 +4,9 @@ import { generateProject, geminiBuilderReady } from "@/lib/builder/generate";
 import { sealManifest } from "@/lib/builder/manifest";
 import { parseBuildRequest } from "@/lib/builder/request";
 import { zipProject } from "@/lib/builder/zip";
+import { enforceAiLimit } from "@/lib/security/ai-limit";
+import { readBoundedBody } from "@/lib/security/body";
+import { refuseAiPost } from "@/lib/security/request";
 
 const MAX_BODY_BYTES = 320_000;
 
@@ -28,35 +31,6 @@ function builderStatus(config: CoachRuntime) {
   return { mode: "local" as const, reason: "not-gemini" as const };
 }
 
-async function readBody(request: Request): Promise<string | null> {
-  const header = Number(request.headers.get("content-length") ?? "");
-  if (Number.isFinite(header) && header > MAX_BODY_BYTES) return null;
-  const reader = request.body?.getReader();
-  if (!reader) {
-    const text = await request.text();
-    return new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES ? null : text;
-  }
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > MAX_BODY_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
 export async function GET() {
   await connection();
   const config = readCoachConfig(process.env);
@@ -64,9 +38,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const refused = refuseAiPost(request);
+  if (refused) return refused;
   await connection();
+  const limited = await enforceAiLimit(request, "builder");
+  if (limited) return limited;
   const config = readCoachConfig(process.env);
-  const text = await readBody(request);
+  const text = await readBoundedBody(request, MAX_BODY_BYTES);
   if (text === null) return respond({ error: "That brief is too large to scaffold." }, 413, config.apiKey);
   let body: unknown;
   try {
@@ -78,12 +56,14 @@ export async function POST(request: Request) {
     return respond({ error: "Send a JSON object." }, 400, config.apiKey);
   }
   const action = (body as { action?: unknown }).action;
-  if (action === "generate") return generate(body, config);
+  if (action === "generate") return generate(request, body, config);
   if (action === "download") return download(body, config);
   return respond({ error: "Unknown builder action." }, 400, config.apiKey);
 }
 
-async function generate(body: unknown, config: CoachRuntime): Promise<Response> {
+async function generate(request: Request, body: unknown, config: CoachRuntime): Promise<Response> {
+  const tight = await enforceAiLimit(request, "builder-generate");
+  if (tight) return tight;
   const parsed = parseBuildRequest(body);
   if (!parsed.ok) return respond({ error: parsed.error }, 400, config.apiKey);
   const result = await generateProject(parsed.value, config);

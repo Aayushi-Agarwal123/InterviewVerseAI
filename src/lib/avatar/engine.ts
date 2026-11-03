@@ -7,6 +7,7 @@ import { completeGemini } from "@/lib/coach/gemini";
 import type { Question, Track } from "@/lib/domain";
 import { QUESTIONS } from "@/lib/questions";
 import type { AvatarInterviewer } from "@/lib/avatar/provider";
+import { redactSensitiveText } from "@/lib/security/redact";
 
 export type AvatarExchange = { prompt: string; answer: string };
 
@@ -17,7 +18,7 @@ export type AvatarTurnResult = {
 };
 
 function scrub(text: string): string {
-  return text.replace(/AIza[0-9A-Za-z\-_]{10,}/g, "[redacted]").replace(/sk-[A-Za-z0-9]{10,}/g, "[redacted]");
+  return redactSensitiveText(text);
 }
 
 export function interviewerTrack(interviewer: AvatarInterviewer, profile: CandidateProfile, asked: number): Track {
