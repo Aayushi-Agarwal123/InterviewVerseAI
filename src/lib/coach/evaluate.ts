@@ -2,7 +2,7 @@ import type { CoachVerdict, Question, ReportCoach } from "@/lib/domain";
 import { weightedOverall } from "@/lib/engine/score";
 import { clampScore } from "@/lib/text";
 import type { CoachRuntime } from "@/lib/coach/config";
-import { ModelCallError } from "@/lib/coach/errors";
+import { ModelCallError, sanitizeProviderDetail } from "@/lib/coach/errors";
 import { localVerdict } from "@/lib/coach/local";
 import { chooseFollowUp } from "@/lib/coach/policy";
 import { debriefMessages, evaluationMessages, type ChatMessage } from "@/lib/coach/prompt";
@@ -63,6 +63,32 @@ function noticeForModelError(error: unknown, kind: "answer" | "debrief"): string
     return GEMINI_NOTICES[kind][error.failure as keyof (typeof GEMINI_NOTICES)["answer"]];
   }
   return kind === "answer" ? LOCAL_FALLBACK_NOTICE : DEBRIEF_FALLBACK_NOTICE;
+}
+
+function logProviderFallback(error: unknown) {
+  if (error instanceof ModelCallError) {
+    console.error(
+      JSON.stringify({
+        scope: "coach",
+        provider: error.provider,
+        failure: error.failure,
+        httpStatus: error.httpStatus,
+        detail: error.detail,
+      }),
+    );
+    return;
+  }
+  const name = error instanceof Error ? error.name : "Error";
+  const timedOut = name === "TimeoutError" || name === "AbortError";
+  console.error(
+    JSON.stringify({
+      scope: "coach",
+      provider: null,
+      failure: "unexpected",
+      httpStatus: null,
+      detail: timedOut ? "timeout" : sanitizeProviderDetail(error instanceof Error ? `${name}: ${error.message}` : name),
+    }),
+  );
 }
 
 export type EvaluationResponse = {
@@ -182,6 +208,7 @@ export async function evaluateAnswer(
     }
     return { mode: "ai", fellBack: false, verdict };
   } catch (error) {
+    logProviderFallback(error);
     return { mode: "local", fellBack: true, notice: noticeForModelError(error, "answer"), verdict: local };
   }
 }
@@ -212,6 +239,7 @@ export async function writeDebrief(
     if (!coach) return { mode: "local", fellBack: true, notice: DEBRIEF_FALLBACK_NOTICE };
     return { mode: "ai", fellBack: false, coach };
   } catch (error) {
+    logProviderFallback(error);
     return { mode: "local", fellBack: true, notice: noticeForModelError(error, "debrief") };
   }
 }

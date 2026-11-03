@@ -1,4 +1,4 @@
-import { ModelCallError, type ModelFailure } from "@/lib/coach/errors";
+import { ModelCallError, sanitizeProviderDetail, type ModelFailure } from "@/lib/coach/errors";
 import type { ModelRequest } from "@/lib/coach/openai";
 
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -28,7 +28,11 @@ function errorReason(details: unknown): string {
   return "";
 }
 
-async function classifyFailure(response: Response): Promise<ModelFailure> {
+function providerDetail(status: string, message: string): string | null {
+  return sanitizeProviderDetail([status, message].filter(Boolean).join(": "));
+}
+
+async function classifyFailure(response: Response): Promise<{ failure: ModelFailure; detail: string | null }> {
   let status = "";
   let message = "";
   let reason = "";
@@ -40,11 +44,14 @@ async function classifyFailure(response: Response): Promise<ModelFailure> {
   } catch {
     await response.body?.cancel().catch(() => undefined);
   }
+  const detail = providerDetail(status, message);
   const quota = /quota/i.test(message);
   if (response.status === 429 || status === "RESOURCE_EXHAUSTED") {
-    return quota ? "quota" : "rate-limit";
+    return { failure: quota ? "quota" : "rate-limit", detail };
   }
-  if (reason === "API_KEY_INVALID" || /api key not valid|api_key_invalid/i.test(message)) return "invalid-key";
+  if (reason === "API_KEY_INVALID" || /api key not valid|api_key_invalid/i.test(message)) {
+    return { failure: "invalid-key", detail };
+  }
   if (
     reason === "API_KEY_HTTP_REFERRER_BLOCKED" ||
     reason === "API_KEY_IP_ADDRESS_BLOCKED" ||
@@ -52,21 +59,21 @@ async function classifyFailure(response: Response): Promise<ModelFailure> {
     reason === "API_KEY_IOS_APP_BLOCKED" ||
     /referr?er|ip address|android app|ios app/i.test(message)
   ) {
-    return "restricted-key";
+    return { failure: "restricted-key", detail };
   }
   if (
     reason === "API_KEY_SERVICE_BLOCKED" ||
     reason === "SERVICE_DISABLED" ||
     /has not been used|is disabled|service.?blocked/i.test(message)
   ) {
-    return "api-disabled";
+    return { failure: "api-disabled", detail };
   }
   if (
     response.status === 404 ||
     status === "NOT_FOUND" ||
     /not found|not supported|unknown model/i.test(message)
   ) {
-    return "unsupported-model";
+    return { failure: "unsupported-model", detail };
   }
   if (
     response.status === 401 ||
@@ -74,10 +81,10 @@ async function classifyFailure(response: Response): Promise<ModelFailure> {
     status === "UNAUTHENTICATED" ||
     status === "PERMISSION_DENIED"
   ) {
-    return "invalid-key";
+    return { failure: "invalid-key", detail };
   }
-  if (response.status === 400 || status === "INVALID_ARGUMENT") return "malformed-request";
-  return "unavailable";
+  if (response.status === 400 || status === "INVALID_ARGUMENT") return { failure: "malformed-request", detail };
+  return { failure: "unavailable", detail };
 }
 
 export async function completeGemini(
@@ -112,17 +119,28 @@ export async function completeGemini(
     },
   );
   if (!response.ok) {
-    const failure = await classifyFailure(response);
-    throw new ModelCallError(failure, "gemini");
+    const classified = await classifyFailure(response);
+    throw new ModelCallError(classified.failure, "gemini", {
+      httpStatus: response.status,
+      detail: classified.detail,
+    });
   }
   let payload: unknown;
   try {
     payload = (await response.json()) as unknown;
   } catch {
     await response.body?.cancel().catch(() => undefined);
-    throw new ModelCallError("unavailable", "gemini");
+    throw new ModelCallError("unavailable", "gemini", {
+      httpStatus: response.status,
+      detail: "unreadable-body",
+    });
   }
   const text = readGeminiText(payload);
-  if (!text) throw new ModelCallError("unavailable", "gemini");
+  if (!text) {
+    throw new ModelCallError("unavailable", "gemini", {
+      httpStatus: response.status,
+      detail: "empty-candidate",
+    });
+  }
   return text;
 }
